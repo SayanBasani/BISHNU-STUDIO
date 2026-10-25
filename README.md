@@ -30,6 +30,7 @@
 23. [Performance Architecture & Audit Findings](#23-performance-architecture--audit-findings)
 24. [Global Theme-Aware Scrollbar Architecture](#24-global-theme-aware-scrollbar-architecture)
 25. [Platform Generalization, Order Lifecycle, Returns & Logistics](#25-platform-generalization-order-lifecycle-returns--logistics)
+26. [Git Workflow, Branch Standards & Contributor Guidelines](#26-git-workflow-branch-standards--contributor-guidelines)
 - [Appendix: Environment-Variable Reference Table](#appendix-environment-variable-reference-table)
 - [Developer & Credits Information](#developer--credits-information)
 
@@ -352,10 +353,25 @@ Open [http://localhost:3000](http://localhost:3000) in your browser:
 
 ## 14. Running the Test Suite
 
-The repository includes 14 Vitest test suites (148 automated tests) covering all critical workflows:
+The repository includes **19 Vitest test suites (207 automated tests)** covering all critical workflows:
 
 ```bash
 npm test
+```
+
+### Running Targeted Test Suites
+```bash
+# Order state machine & logistics tracking
+npm test -- tests/order-state-machine-and-tracking.test.ts
+
+# Return eligibility & idempotent inventory restocking
+npm test -- tests/returns-and-refunds.test.ts
+
+# Authoritative business identity & store availability toggle
+npm test -- tests/business-config-and-availability.test.ts
+
+# Theme-aware scrollbars
+npm test -- tests/theme-scrollbar.test.ts
 ```
 
 ### How Tests Interact with the Database
@@ -741,6 +757,61 @@ To fulfill real-world e-commerce requirements, a dedicated return subsystem has 
 
 ---
 
+## 26. Git Workflow, Branch Standards & Contributor Guidelines
+
+The Bishnu Studio repository is hosted on GitHub and maintains a clean, linear development workflow tracked against `main`.
+
+- **GitHub Remote**: `https://github.com/SayanBasani/BISHNU-STUDIO.git`
+- **Primary Branch**: `main` (Tracks `origin/main`)
+- **Agent Guidelines File**: [`AGENTS.md`](./AGENTS.md) provides authoritative instructions for automated agents and pair programmers.
+
+### Standard Git Workflow for New Features & Bug Fixes
+
+1. **Pre-Flight Inspection**:
+   ```powershell
+   git status --short
+   ```
+   Confirm that the working tree is understood and preserve any existing uncommitted user changes. Never run destructive reset commands.
+
+2. **Implement & Test**:
+   Execute the test suite and verify the Next.js production build:
+   ```powershell
+   npm test
+   npm run build
+   ```
+
+3. **Stage Selective Changes**:
+   Stage only files directly relevant to the completed milestone:
+   ```bash
+   git add <path/to/file1> <path/to/file2>
+   ```
+   Avoid blanket `git add .` if unrelated scratch files or temporary logs exist.
+
+4. **Review Staged Diff**:
+   Inspect the exact changes before committing:
+   ```bash
+   git diff --staged
+   ```
+   Confirm that no `.env.local` files, database dumps, customer uploads, or secrets are staged.
+
+5. **Commit with Meaningful Message**:
+   ```bash
+   git commit -m "feat(scope): concise description of verified change"
+   ```
+
+6. **Push to GitHub**:
+   ```powershell
+   git push origin main
+   ```
+   Verify that the push succeeds with exit code 0 and that the working tree is clean (`git status`).
+
+### Absolute Security & Repository Rules
+- **No Secrets Exposure**: Never commit `.env`, `.env.local`, passwords, or private connection strings.
+- **No Force Pushing**: `git push --force` and destructive commands (`git reset --hard`) are strictly forbidden in normal workflow.
+- **No Empty Commits**: Do not create placeholder commits without real changes.
+
+---
+
 ## Appendix: Environment-Variable Reference Table
 
 | Variable Name | Purpose | Required / Optional | Where to Obtain Value | Destination File / Dashboard | Scope | Environments | Requires Restart? |
@@ -767,5 +838,3 @@ Bishnu Studio was built with an emphasis on local community utility, transaction
 - **Developer Credits Page**: View the full project timeline, certified technology stack, and engineering attributions at [`/developer`](file:///developer).
 - **Official Authorship Statement**: *"Website developed and maintained by Sayan (Antigravity Engineer) for Bishnu Studio."*
 - **Admin Developer Editor**: Admin console operators can update credits, bio, and social links at `/admin/settings/developer`.
-#   B I S H N U - S T U D I O  
- 

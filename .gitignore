@@ -1,40 +1,61 @@
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.js
 
-# testing
+# Testing & Coverage
 /coverage
 
-# next.js
+# Next.js Build Outputs
 /.next/
 /out/
-
-# production
 /build
 
-# local data and uploads
+# Local Database Files & Backups (Never commit private database data)
 /data/*.db
 /data/*.db-journal
 /data/*.db-wal
 /data/*.db-shm
+/data/*.sqlite*
+/data/*.dump
+/data/*.sql
+/data/*.backup
+/data/*.dump.gz
+
+# Uploads & Customer Private Documents
 /uploads/*
 !/uploads/.gitkeep
 
-# misc
-.DS_Store
+# Credentials, Private Keys & Certificates
 *.pem
+*.key
+*.cert
+*.crt
 
-# debug logs
+# Debug Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# local env files
-.env*.local
+# Environment Configuration Files (Contains secrets, API keys, passwords)
 .env
-.env.local
+.env*.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
 
-# typescript
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# TypeScript & Build Cache
 *.tsbuildinfo
 next-env.d.ts
