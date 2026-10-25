@@ -1,0 +1,352 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthSession } from "@/lib/auth";
+import { db } from "@/db";
+import {
+  orders,
+  orderItems,
+  orderReturns,
+  orderReturnItems,
+  users,
+  products,
+} from "@/db/schema";
+import {
+  generateReturnReference,
+  evaluateOrderReturnEligibility,
+} from "@/lib/return-state-machine";
+import { getShopSettings } from "@/lib/settings";
+import { logAuditEvent } from "@/lib/audit";
+import { recordOrderEvent } from "@/lib/order-timeline";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
+import { z } from "zod";
+import crypto from "crypto";
+
+export const dynamic = "force-dynamic";
+
+const createReturnSchema = z.object({
+  orderId: z.string().min(1, "Order ID is required"),
+  reason: z.enum([
+    "damaged",
+    "wrong_item",
+    "defective",
+    "print_specification_mismatch",
+    "missing_parts",
+    "other",
+  ]),
+  customerDescription: z
+    .string()
+    .min(10, "Please provide a detailed description (minimum 10 characters)."),
+  requestedResolution: z.enum(["refund", "exchange"]).default("refund"),
+  pickupMethod: z.enum(["courier_pickup", "counter_dropoff"]).default("courier_pickup"),
+  evidenceUrls: z.array(z.string()).optional(),
+  items: z
+    .array(
+      z.object({
+        orderItemId: z.string().min(1),
+        quantity: z.number().int().min(1),
+      })
+    )
+    .min(1, "At least one item must be selected for return."),
+});
+
+export async function POST(req: NextRequest) {
+  try {
+    const auth = await getAuthSession();
+    if (!auth?.user) {
+      return NextResponse.json(
+        { error: "Authentication required to submit a return request." },
+        { status: 401 }
+      );
+    }
+
+    const body = await req.json();
+    const validation = createReturnSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    const {
+      orderId,
+      reason,
+      customerDescription,
+      requestedResolution,
+      pickupMethod,
+      evidenceUrls,
+      items: requestedReturnItems,
+    } = validation.data;
+
+    // Fetch order
+    const orderRows = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .limit(1);
+
+    if (orderRows.length === 0) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
+    const order = orderRows[0];
+    const isAdmin = auth.user.role === "admin" || auth.user.role === "staff";
+
+    // Strictly enforce ownership (only customer who placed order or admin)
+    if (!isAdmin && order.customerId !== auth.user.id) {
+      return NextResponse.json(
+        { error: "Forbidden. You can only request returns on your own orders." },
+        { status: 403 }
+      );
+    }
+
+    // Fetch shop return settings
+    const settings = await getShopSettings();
+    const returnWindowDays = settings.returnWindowDays || 7;
+
+    // Fetch order items
+    const allOrderItems = await db
+      .select()
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId));
+
+    // Fetch existing return items for this order to prevent duplicate return quantities
+    const existingReturns = await db
+      .select({
+        orderItemId: orderReturnItems.orderItemId,
+        quantity: orderReturnItems.quantity,
+        status: orderReturns.status,
+      })
+      .from(orderReturnItems)
+      .innerJoin(orderReturns, eq(orderReturnItems.returnId, orderReturns.id))
+      .where(eq(orderReturns.orderId, orderId));
+
+    // Evaluate eligibility
+    const eligibility = evaluateOrderReturnEligibility(
+      order,
+      allOrderItems,
+      existingReturns,
+      returnWindowDays
+    );
+
+    if (!eligibility.isEligible) {
+      return NextResponse.json(
+        { error: eligibility.reason || "This order is not eligible for return." },
+        { status: 400 }
+      );
+    }
+
+    // Validate requested items and calculate eligible refund snapshot
+    const itemMap = new Map(allOrderItems.map((i) => [i.id, i]));
+    const eligibilityMap = new Map(
+      eligibility.returnableItems.map((i) => [i.orderItemId, i])
+    );
+
+    let calculatedRefundAmount = 0;
+    const validatedItemsToReturn: Array<{
+      id: string;
+      orderItemId: string;
+      productId: string | null;
+      quantity: number;
+      unitPriceSnapshot: number;
+      totalPriceSnapshot: number;
+    }> = [];
+
+    for (const reqItem of requestedReturnItems) {
+      const orderItem = itemMap.get(reqItem.orderItemId);
+      if (!orderItem) {
+        return NextResponse.json(
+          { error: `Item #${reqItem.orderItemId} does not belong to this order.` },
+          { status: 400 }
+        );
+      }
+
+      const itemEligibility = eligibilityMap.get(reqItem.orderItemId);
+      if (!itemEligibility || itemEligibility.eligibleQuantity < reqItem.quantity) {
+        return NextResponse.json(
+          {
+            error: `Requested return quantity (${reqItem.quantity}) exceeds remaining eligible quantity (${itemEligibility?.eligibleQuantity || 0}).`,
+          },
+          { status: 400 }
+        );
+      }
+
+      const itemTotal = orderItem.unitPriceSnapshot * reqItem.quantity;
+      calculatedRefundAmount += itemTotal;
+
+      validatedItemsToReturn.push({
+        id: `reti_${crypto.randomUUID()}`,
+        orderItemId: orderItem.id,
+        productId: orderItem.productId || null,
+        quantity: reqItem.quantity,
+        unitPriceSnapshot: orderItem.unitPriceSnapshot,
+        totalPriceSnapshot: itemTotal,
+      });
+    }
+
+    const returnId = `ret_${crypto.randomUUID()}`;
+    const returnReference = generateReturnReference();
+    const now = Date.now();
+
+    // Insert return record
+    await db.insert(orderReturns).values({
+      id: returnId,
+      returnReference,
+      orderId,
+      customerId: order.customerId,
+      status: "requested",
+      reason,
+      customerDescription: customerDescription.trim(),
+      requestedResolution,
+      pickupMethod,
+      evidenceUrlsJson: evidenceUrls && evidenceUrls.length > 0 ? JSON.stringify(evidenceUrls) : null,
+      refundAmount: calculatedRefundAmount,
+      restocked: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Insert return items
+    for (const vItem of validatedItemsToReturn) {
+      await db.insert(orderReturnItems).values({
+        id: vItem.id,
+        returnId,
+        orderItemId: vItem.orderItemId,
+        productId: vItem.productId,
+        quantity: vItem.quantity,
+        unitPriceSnapshot: vItem.unitPriceSnapshot,
+        totalPriceSnapshot: vItem.totalPriceSnapshot,
+        createdAt: now,
+      });
+    }
+
+    // Record order timeline event
+    await recordOrderEvent({
+      orderId,
+      previousStatus: order.orderStatus,
+      newStatus: order.orderStatus,
+      previousPaymentStatus: order.paymentStatus,
+      newPaymentStatus: order.paymentStatus,
+      changedByUserId: auth.user.id,
+      actorRole: isAdmin ? "admin" : "customer",
+      customerMessage: `Return requested (${returnReference}) for ${validatedItemsToReturn.length} item(s). Reason: ${reason.replace(/_/g, " ")}.`,
+      internalNote: `Return #${returnReference} created by ${auth.user.email}. Est. refund: ₹${calculatedRefundAmount.toFixed(2)}.`,
+    });
+
+    // Audit log
+    await logAuditEvent({
+      userId: auth.user.id,
+      action: "return_requested",
+      entityType: "order",
+      entityId: orderId,
+      details: {
+        returnId,
+        returnReference,
+        reason,
+        refundAmount: calculatedRefundAmount,
+        itemCount: validatedItemsToReturn.length,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Return request submitted successfully. Our studio team will review your request.",
+      returnReference,
+      returnId,
+    });
+  } catch (error: any) {
+    console.error("Create return request error:", error);
+    return NextResponse.json(
+      { error: "Failed to submit return request" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const auth = await getAuthSession();
+    if (!auth?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const orderId = searchParams.get("orderId");
+    const status = searchParams.get("status");
+    const search = searchParams.get("search");
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20")));
+    const offset = (page - 1) * limit;
+
+    const isAdmin = auth.user.role === "admin" || auth.user.role === "staff";
+
+    // Build query conditions
+    const conditions = [];
+
+    // Ownership check: regular customer only sees their own returns
+    if (!isAdmin) {
+      conditions.push(eq(orderReturns.customerId, auth.user.id));
+    }
+
+    if (orderId) {
+      conditions.push(eq(orderReturns.orderId, orderId));
+    }
+
+    if (status && status !== "all") {
+      conditions.push(eq(orderReturns.status, status as any));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Fetch paginated returns
+    const returnRows = await db
+      .select({
+        id: orderReturns.id,
+        returnReference: orderReturns.returnReference,
+        orderId: orderReturns.orderId,
+        customerId: orderReturns.customerId,
+        status: orderReturns.status,
+        reason: orderReturns.reason,
+        requestedResolution: orderReturns.requestedResolution,
+        pickupMethod: orderReturns.pickupMethod,
+        refundAmount: orderReturns.refundAmount,
+        refundMethod: orderReturns.refundMethod,
+        courierName: orderReturns.courierName,
+        trackingNumber: orderReturns.trackingNumber,
+        trackingUrl: orderReturns.trackingUrl,
+        customerInstructions: orderReturns.customerInstructions,
+        internalNotes: isAdmin ? orderReturns.internalNotes : sql<string>`NULL`,
+        createdAt: orderReturns.createdAt,
+        updatedAt: orderReturns.updatedAt,
+      })
+      .from(orderReturns)
+      .where(whereClause)
+      .orderBy(desc(orderReturns.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Count total for pagination
+    const totalCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(orderReturns)
+      .where(whereClause);
+
+    const total = Number(totalCount[0]?.count || 0);
+
+    return NextResponse.json({
+      success: true,
+      returns: returnRows,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    });
+  } catch (error: any) {
+    console.error("Fetch returns list error:", error);
+    return NextResponse.json(
+      { error: "Failed to retrieve return requests" },
+      { status: 500 }
+    );
+  }
+}

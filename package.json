@@ -1,0 +1,51 @@
+{
+  "name": "bishnu-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bishnu Studio - Shopping, Printing & Document Services Website",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:check": "tsx scripts/check-db.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:setup": "tsx scripts/check-db.ts && tsx src/db/migrate.ts && tsx src/db/seed.ts",
+    "db:migrate-neon": "tsx scripts/migrate-sqlite-to-neon.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:reset-test": "tsx src/scripts/reset-test-db.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@neondatabase/serverless": "^1.2.0",
+    "bcryptjs": "^2.4.3",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.38.3",
+    "lucide-react": "^0.469.0",
+    "next": "^14.2.24",
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.17.10",
+    "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.30.2",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

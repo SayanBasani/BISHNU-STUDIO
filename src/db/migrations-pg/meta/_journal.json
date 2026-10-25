@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1792872291032,
+      "tag": "0000_lyrical_prima",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792902539420,
+      "tag": "0001_shocking_piledriver",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792911750146,
+      "tag": "0002_icy_leader",
+      "breakpoints": true
+    }
+  ]
+}
