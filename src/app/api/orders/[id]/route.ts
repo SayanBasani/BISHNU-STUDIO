@@ -11,11 +11,47 @@ import {
 } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
 import { getOrderTimeline, recordOrderEvent } from "@/lib/order-timeline";
-import { validateOrderTransition, validateTrackingUrl } from "@/lib/order-state-machine";
+import {
+  validateOrderTransition,
+  validateTrackingUrl,
+  CANONICAL_PAYMENT_STATUSES,
+} from "@/lib/order-state-machine";
+import { createRequestTimer } from "@/lib/perf";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const paymentStatusSchema = z
+  .string()
+  .optional()
+  .nullable()
+  .refine(
+    (val) => {
+      if (val === undefined || val === null || val === "") return true;
+      return (CANONICAL_PAYMENT_STATUSES as readonly string[]).includes(val);
+    },
+    (val) => {
+      if (
+        val === "pending_refund" ||
+        val === "refund_approved" ||
+        val === "refund_processed" ||
+        val === "rejected_refund"
+      ) {
+        return {
+          message: `Invalid payment status '${val}'. Returns and customer refunds are managed independently via the dedicated Returns workflow (/api/returns).`,
+        };
+      }
+      if (val === "received") {
+        return {
+          message: `Invalid payment status 'received'. Expected 'paid' (confirmed received) or 'pending_verification'.`,
+        };
+      }
+      return {
+        message: `Invalid payment status '${val}'. Valid statuses are: ${CANONICAL_PAYMENT_STATUSES.join(", ")}.`,
+      };
+    }
+  );
 
 const updateOrderStatusSchema = z.object({
   orderStatus: z
@@ -29,9 +65,7 @@ const updateOrderStatusSchema = z.object({
       "cancelled",
     ])
     .optional(),
-  paymentStatus: z
-    .enum(["unpaid", "pending", "paid", "refunded", "failed"])
-    .optional(),
+  paymentStatus: paymentStatusSchema,
   internalNotes: z.string().optional().nullable(),
   trackingNumber: z.string().optional().nullable(),
   trackingUrl: z.string().optional().nullable(),
@@ -58,25 +92,23 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const timer = createRequestTimer(req, `/api/orders/${params.id}`);
   try {
     const auth = await getAuthSession();
     if (!auth?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return timer.finish(NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
     }
 
     const { id } = params;
 
     // Fetch order
-    const orderRows = await db
-      .select()
-      .from(orders)
-      .where(eq(orders.id, id))
-      .limit(1);
+    const orderRows = await timer.measure("database.orders.fetch", () =>
+      db.select().from(orders).where(eq(orders.id, id)).limit(1)
+    );
 
     if (orderRows.length === 0) {
-      return NextResponse.json(
-        { error: "Order not found" },
-        { status: 404 }
+      return timer.finish(
+        NextResponse.json({ error: "Order not found" }, { status: 404 })
       );
     }
 
@@ -85,55 +117,62 @@ export async function GET(
 
     // Strictly enforce ownership
     if (!isAdmin && order.customerId !== auth.user.id) {
-      return NextResponse.json(
-        { error: "Forbidden. You do not have permission to view this order." },
-        { status: 403 }
+      return timer.finish(
+        NextResponse.json(
+          { error: "Forbidden. You do not have permission to view this order." },
+          { status: 403 }
+        )
       );
     }
 
     // Fetch order items
-    const items = await db
-      .select()
-      .from(orderItems)
-      .where(eq(orderItems.orderId, id));
+    const items = await timer.measure("database.order_items.fetch", () =>
+      db.select().from(orderItems).where(eq(orderItems.orderId, id))
+    );
 
     // Fetch associated files
-    const files = await db
-      .select({
-        id: orderFiles.id,
-        orderItemId: orderFiles.orderItemId,
-        originalFilename: orderFiles.originalFilename,
-        fileSize: orderFiles.fileSize,
-        mimeType: orderFiles.mimeType,
-        fileCategory: orderFiles.fileCategory,
-        pageCount: orderFiles.pageCount,
-        createdAt: orderFiles.createdAt,
-      })
-      .from(orderFiles)
-      .where(eq(orderFiles.orderId, id));
+    const files = await timer.measure("database.order_files.fetch", () =>
+      db
+        .select({
+          id: orderFiles.id,
+          orderItemId: orderFiles.orderItemId,
+          originalFilename: orderFiles.originalFilename,
+          fileSize: orderFiles.fileSize,
+          mimeType: orderFiles.mimeType,
+          fileCategory: orderFiles.fileCategory,
+          pageCount: orderFiles.pageCount,
+          createdAt: orderFiles.createdAt,
+        })
+        .from(orderFiles)
+        .where(eq(orderFiles.orderId, id))
+    );
 
     // Fetch customer info
     let customerInfo = null;
-    const custRows = await db
-      .select({
-        id: users.id,
-        fullName: users.fullName,
-        email: users.email,
-        phone: users.phone,
-      })
-      .from(users)
-      .where(eq(users.id, order.customerId))
-      .limit(1);
+    const custRows = await timer.measure("database.users.fetch", () =>
+      db
+        .select({
+          id: users.id,
+          fullName: users.fullName,
+          email: users.email,
+          phone: users.phone,
+        })
+        .from(users)
+        .where(eq(users.id, order.customerId))
+        .limit(1)
+    );
 
     if (custRows.length > 0) {
       customerInfo = custRows[0];
     }
 
     // Fetch customer's reviews for items in this order
-    const existingReviews = await db
-      .select()
-      .from(productReviews)
-      .where(eq(productReviews.customerId, auth.user.id));
+    const existingReviews = await timer.measure("database.product_reviews.fetch", () =>
+      db
+        .select()
+        .from(productReviews)
+        .where(eq(productReviews.customerId, auth.user.id))
+    );
 
     const reviewByProductId = new Map(existingReviews.map((r) => [r.productId, r]));
 
@@ -151,17 +190,21 @@ export async function GET(
     }));
 
     // Fetch timeline and payment submissions
-    const rawTimeline = await getOrderTimeline(id);
+    const rawTimeline = await timer.measure("database.timeline.fetch", () =>
+      getOrderTimeline(id)
+    );
     const timeline = rawTimeline.map((ev) => ({
       ...ev,
       internalNote: isAdmin ? ev.internalNote : undefined,
     }));
 
-    const submissions = await db
-      .select()
-      .from(paymentSubmissions)
-      .where(eq(paymentSubmissions.orderId, id))
-      .orderBy(desc(paymentSubmissions.createdAt));
+    const submissions = await timer.measure("database.payment_submissions.fetch", () =>
+      db
+        .select()
+        .from(paymentSubmissions)
+        .where(eq(paymentSubmissions.orderId, id))
+        .orderBy(desc(paymentSubmissions.createdAt))
+    );
 
     const latestPaymentSubmission = submissions.length > 0 ? submissions[0] : null;
 
@@ -192,27 +235,31 @@ export async function GET(
           );
     const amountRemaining = Math.max(0, order.totalAmount - amountPaid);
 
-    return NextResponse.json({
-      success: true,
-      order: {
-        ...order,
-        internalNotes: isAdmin ? order.internalNotes : undefined,
-        shippingAddress,
-        isAddressMissing,
-        amountPaid,
-        amountRemaining,
-        items: parsedItems,
-        customer: customerInfo,
-        timeline,
-        latestPaymentSubmission,
-        paymentSubmissions: submissions,
-      },
-    });
+    return timer.finish(
+      NextResponse.json({
+        success: true,
+        order: {
+          ...order,
+          internalNotes: isAdmin ? order.internalNotes : undefined,
+          shippingAddress,
+          isAddressMissing,
+          amountPaid,
+          amountRemaining,
+          items: parsedItems,
+          customer: customerInfo,
+          timeline,
+          latestPaymentSubmission,
+          paymentSubmissions: submissions,
+        },
+      })
+    );
   } catch (error) {
     console.error("Fetch order detail error:", error);
-    return NextResponse.json(
-      { error: "Failed to retrieve order details" },
-      { status: 500 }
+    return timer.finish(
+      NextResponse.json(
+        { error: "Failed to retrieve order details" },
+        { status: 500 }
+      )
     );
   }
 }
@@ -221,12 +268,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const timer = createRequestTimer(req, `/api/orders/${params.id}`);
   try {
     const auth = await getAuthSession();
     if (!auth?.user || (auth.user.role !== "admin" && auth.user.role !== "staff")) {
-      return NextResponse.json(
-        { error: "Forbidden. Admin authorization required." },
-        { status: 403 }
+      return timer.finish(
+        NextResponse.json(
+          { error: "Forbidden. Admin authorization required." },
+          { status: 403 }
+        )
       );
     }
 
@@ -234,9 +284,11 @@ export async function PATCH(
     const body = await req.json();
     const validation = updateOrderStatusSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json(
-        { error: validation.error.errors[0].message },
-        { status: 400 }
+      return timer.finish(
+        NextResponse.json(
+          { error: validation.error.errors[0].message },
+          { status: 400 }
+        )
       );
     }
 
@@ -255,39 +307,48 @@ export async function PATCH(
       allowAdminOverride,
     } = validation.data;
 
-    const existing = await db
-      .select()
-      .from(orders)
-      .where(eq(orders.id, id))
-      .limit(1);
+    const existing = await timer.measure("database.orders.fetch", () =>
+      db.select().from(orders).where(eq(orders.id, id)).limit(1)
+    );
 
     if (existing.length === 0) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+      return timer.finish(
+        NextResponse.json({ error: "Order not found" }, { status: 404 })
+      );
     }
 
     const existingOrder = existing[0];
 
-    // Enforce validated state machine transitions (Phase 5.2)
+    // Enforce validated state machine transitions with deliveryType context
     if (orderStatus && orderStatus !== existingOrder.orderStatus) {
       const transitionValidation = validateOrderTransition(
         existingOrder.orderStatus,
         orderStatus,
-        Boolean(allowAdminOverride)
+        {
+          allowAdminOverride: Boolean(allowAdminOverride),
+          deliveryType: existingOrder.deliveryType,
+          courierName: courierName || existingOrder.courierName,
+          trackingNumber: trackingNumber || existingOrder.trackingNumber,
+        }
       );
       if (!transitionValidation.valid) {
-        return NextResponse.json(
-          { error: transitionValidation.error },
-          { status: 400 }
+        return timer.finish(
+          NextResponse.json(
+            { error: transitionValidation.error },
+            { status: 400 }
+          )
         );
       }
     }
 
-    // Enforce safe tracking URL validation (Phase 4.2)
+    // Enforce safe tracking URL validation
     let validatedTrackingUrl: string | null | undefined = undefined;
     if (trackingUrl !== undefined) {
       const urlCheck = validateTrackingUrl(trackingUrl);
       if (!urlCheck.valid) {
-        return NextResponse.json({ error: urlCheck.error }, { status: 400 });
+        return timer.finish(
+          NextResponse.json({ error: urlCheck.error }, { status: 400 })
+        );
       }
       validatedTrackingUrl = urlCheck.safeUrl;
     }
@@ -353,9 +414,11 @@ export async function PATCH(
       else if (orderStatus === "completed") updates.fulfillmentStatus = "delivered";
     }
 
-    await db.update(orders).set(updates).where(eq(orders.id, id));
+    await timer.measure("database.orders.update", () =>
+      db.update(orders).set(updates).where(eq(orders.id, id))
+    );
 
-    // Determine customer timeline message
+    // Determine customer timeline message based on order lifecycle and delivery type
     let customerMsg = customerFulfillmentNote?.trim() || `Order status updated to ${
       (orderStatus || existingOrder.orderStatus).replace(/_/g, " ")
     }.`;
@@ -366,7 +429,11 @@ export async function PATCH(
       } else if (orderStatus === "processing") {
         customerMsg = "Your print order is actively being processed in our studio.";
       } else if (orderStatus === "ready_for_collection") {
-        customerMsg = "Your order is ready for counter pickup at our studio!";
+        if (existingOrder.deliveryType === "home_delivery") {
+          customerMsg = "Your order has been packaged and prepared for courier dispatch.";
+        } else {
+          customerMsg = "Your order is ready for counter pickup at our studio!";
+        }
       } else if (orderStatus === "out_for_delivery") {
         const carrier = courierName || existingOrder.courierName;
         const track = trackingNumber || existingOrder.trackingNumber;
@@ -374,7 +441,11 @@ export async function PATCH(
           carrier ? ` Carrier: ${carrier}.` : ""
         }${track ? ` Tracking ID: ${track}` : ""}`;
       } else if (orderStatus === "completed") {
-        customerMsg = "Order completed and delivered. Thank you for your business!";
+        if (existingOrder.deliveryType === "home_delivery") {
+          customerMsg = "Order delivered successfully to your doorstep. Thank you for your business!";
+        } else {
+          customerMsg = "Order collected at studio counter. Thank you for your business!";
+        }
       } else if (orderStatus === "cancelled") {
         customerMsg = "Order has been cancelled.";
       } else if (trackingNumber && trackingNumber !== existingOrder.trackingNumber) {
@@ -382,39 +453,43 @@ export async function PATCH(
       }
     }
 
-    await recordOrderEvent({
-      orderId: id,
-      previousStatus: existingOrder.orderStatus,
-      newStatus: orderStatus || existingOrder.orderStatus,
-      previousPaymentStatus: existingOrder.paymentStatus,
-      newPaymentStatus: paymentStatus || existingOrder.paymentStatus,
-      changedByUserId: auth.user.id,
-      actorRole: "admin",
-      customerMessage: customerMsg,
-      internalNote:
-        internalNotes !== undefined
-          ? (internalNotes?.trim() || null)
-          : undefined,
-    });
-
-    await logAuditEvent({
-      userId: auth.user.id,
-      action: "order_status_updated",
-      entityType: "order",
-      entityId: id,
-      details: {
-        orderReference: existingOrder.orderReference,
+    await timer.measure("database.timeline.record", () =>
+      recordOrderEvent({
+        orderId: id,
         previousStatus: existingOrder.orderStatus,
         newStatus: orderStatus || existingOrder.orderStatus,
-        paymentStatus: paymentStatus || existingOrder.paymentStatus,
-        trackingNumber: updates.trackingNumber,
-        trackingUrl: updates.trackingUrl,
-        courierName: updates.courierName,
-        deliveryPersonName: updates.deliveryPersonName,
-        expectedDeliveryDate: updates.expectedDeliveryDate,
-        customerFulfillmentNote: updates.customerFulfillmentNote,
-      },
-    });
+        previousPaymentStatus: existingOrder.paymentStatus,
+        newPaymentStatus: paymentStatus || existingOrder.paymentStatus,
+        changedByUserId: auth.user.id,
+        actorRole: "admin",
+        customerMessage: customerMsg,
+        internalNote:
+          internalNotes !== undefined
+            ? (internalNotes?.trim() || null)
+            : undefined,
+      })
+    );
+
+    await timer.measure("database.audit.log", () =>
+      logAuditEvent({
+        userId: auth.user.id,
+        action: "order_status_updated",
+        entityType: "order",
+        entityId: id,
+        details: {
+          orderReference: existingOrder.orderReference,
+          previousStatus: existingOrder.orderStatus,
+          newStatus: orderStatus || existingOrder.orderStatus,
+          paymentStatus: paymentStatus || existingOrder.paymentStatus,
+          trackingNumber: updates.trackingNumber,
+          trackingUrl: updates.trackingUrl,
+          courierName: updates.courierName,
+          deliveryPersonName: updates.deliveryPersonName,
+          expectedDeliveryDate: updates.expectedDeliveryDate,
+          customerFulfillmentNote: updates.customerFulfillmentNote,
+        },
+      })
+    );
 
     // Dispatch customer notification for status change or tracking update
     if (
@@ -429,35 +504,41 @@ export async function PATCH(
         const statusLabel = (orderStatus || existingOrder.orderStatus)
           .replace(/_/g, " ")
           .toUpperCase();
-        await createNotification({
-          recipientType: "customer",
-          recipientId: existingOrder.customerId,
-          category: isDelivery ? "delivery" : "order",
-          eventType: `order_${orderStatus || "updated"}`,
-          title: `Order #${existingOrder.orderReference}: ${statusLabel}`,
-          message: customerMsg,
-          entityType: "order",
-          entityId: id,
-          linkUrl: `/account/orders/${id}`,
-          priority:
-            orderStatus === "out_for_delivery" || orderStatus === "ready_for_collection"
-              ? "high"
-              : "normal",
-        });
+        await timer.measure("notifications.dispatch", () =>
+          createNotification({
+            recipientType: "customer",
+            recipientId: existingOrder.customerId,
+            category: isDelivery ? "delivery" : "order",
+            eventType: `order_${orderStatus || "updated"}`,
+            title: `Order #${existingOrder.orderReference}: ${statusLabel}`,
+            message: customerMsg,
+            entityType: "order",
+            entityId: id,
+            linkUrl: `/account/orders/${id}`,
+            priority:
+              orderStatus === "out_for_delivery" || orderStatus === "ready_for_collection"
+                ? "high"
+                : "normal",
+          })
+        );
       } catch (notifErr) {
         console.error("Failed to dispatch order status notification:", notifErr);
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "Order updated successfully",
-    });
+    return timer.finish(
+      NextResponse.json({
+        success: true,
+        message: "Order updated successfully",
+      })
+    );
   } catch (error: any) {
     console.error("Update order error:", error);
-    return NextResponse.json(
-      { error: "Failed to update order" },
-      { status: 500 }
+    return timer.finish(
+      NextResponse.json(
+        { error: "Failed to update order" },
+        { status: 500 }
+      )
     );
   }
 }

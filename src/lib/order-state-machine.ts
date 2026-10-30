@@ -34,15 +34,37 @@ export const FULFILLMENT_STATUSES = [
 
 export type FulfillmentStatus = typeof FULFILLMENT_STATUSES[number];
 
+export const CANONICAL_PAYMENT_STATUSES = [
+  "unpaid",
+  "awaiting_payment",
+  "payment_initiated",
+  "pending_verification",
+  "paid",
+  "rejected",
+  "failed",
+  "refunded",
+  "review_required",
+  "pending",
+] as const;
+
+export type CanonicalPaymentStatus = typeof CANONICAL_PAYMENT_STATUSES[number];
+
 export const VALID_ORDER_TRANSITIONS: Record<OrderLifecycleStatus, OrderLifecycleStatus[]> = {
-  pending: ["confirmed", "cancelled"],
-  confirmed: ["processing", "cancelled"],
-  processing: ["ready_for_collection", "out_for_delivery", "cancelled"],
-  ready_for_collection: ["completed"],
-  out_for_delivery: ["completed"],
+  pending: ["confirmed", "processing", "cancelled"],
+  confirmed: ["processing", "ready_for_collection", "out_for_delivery", "cancelled"],
+  processing: ["ready_for_collection", "out_for_delivery", "completed", "confirmed", "cancelled"],
+  ready_for_collection: ["out_for_delivery", "completed", "processing", "cancelled"],
+  out_for_delivery: ["completed", "ready_for_collection", "processing", "cancelled"],
   completed: [], // Terminal for standard workflow. Returns handled via Return State Machine.
   cancelled: [], // Terminal
 };
+
+export interface OrderTransitionOptions {
+  allowAdminOverride?: boolean;
+  deliveryType?: string;
+  courierName?: string | null;
+  trackingNumber?: string | null;
+}
 
 /**
  * Validates whether an order status transition is permissible.
@@ -50,11 +72,19 @@ export const VALID_ORDER_TRANSITIONS: Record<OrderLifecycleStatus, OrderLifecycl
 export function validateOrderTransition(
   currentStatus: string,
   targetStatus: string,
-  allowAdminOverride: boolean = false
+  allowAdminOverrideOrOptions: boolean | OrderTransitionOptions = false
 ): { valid: boolean; error?: string } {
   if (currentStatus === targetStatus) {
     return { valid: true };
   }
+
+  const isBool = typeof allowAdminOverrideOrOptions === "boolean";
+  const allowAdminOverride = isBool
+    ? allowAdminOverrideOrOptions
+    : Boolean(allowAdminOverrideOrOptions?.allowAdminOverride);
+  const options: OrderTransitionOptions = isBool
+    ? {}
+    : allowAdminOverrideOrOptions || {};
 
   const validNext = VALID_ORDER_TRANSITIONS[currentStatus as OrderLifecycleStatus];
 
@@ -63,10 +93,6 @@ export function validateOrderTransition(
       valid: false,
       error: `Unknown current order status: ${currentStatus}`,
     };
-  }
-
-  if (validNext.includes(targetStatus as OrderLifecycleStatus)) {
-    return { valid: true };
   }
 
   // Prevent accidental backward transitions from completed or cancelled
@@ -90,13 +116,29 @@ export function validateOrderTransition(
     return { valid: true };
   }
 
+  // Guard against courier dispatch transitions on store pickup orders
+  if (
+    options.deliveryType === "store_pickup" &&
+    targetStatus === "out_for_delivery" &&
+    !allowAdminOverride
+  ) {
+    return {
+      valid: false,
+      error: "Store pickup orders do not have courier delivery. Transition directly to 'ready_for_collection' (Ready for Pickup) or 'completed' (Collected).",
+    };
+  }
+
+  if (validNext.includes(targetStatus as OrderLifecycleStatus)) {
+    return { valid: true };
+  }
+
   if (allowAdminOverride) {
     return { valid: true };
   }
 
   return {
     valid: false,
-    error: `Cannot transition order status from '${currentStatus.replace(/_/g, " ")}' to '${targetStatus.replace(/_/g, " ")}'. Allowed transitions: ${validNext.join(", ") || "None (Terminal status)"}.`,
+    error: `Cannot transition order status from '${currentStatus}' to '${targetStatus}'. Allowed transitions: ${validNext.join(", ") || "None (Terminal status)"}.`,
   };
 }
 

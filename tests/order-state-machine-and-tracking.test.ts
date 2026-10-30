@@ -45,15 +45,78 @@ describe("Order Lifecycle State Machine & Logistics Tracking Tests", () => {
       expect(validateOrderTransition("pending", "cancelled").valid).toBe(true);
     });
 
-    it("should allow confirmed -> processing or cancelled", () => {
+    it("should allow confirmed -> processing, ready_for_collection, out_for_delivery, or cancelled", () => {
       expect(validateOrderTransition("confirmed", "processing").valid).toBe(true);
+      expect(validateOrderTransition("confirmed", "ready_for_collection").valid).toBe(true);
+      expect(validateOrderTransition("confirmed", "out_for_delivery").valid).toBe(true);
       expect(validateOrderTransition("confirmed", "cancelled").valid).toBe(true);
     });
 
-    it("should allow processing -> ready_for_collection, out_for_delivery, or cancelled", () => {
+    it("should allow processing -> ready_for_collection, out_for_delivery, completed, confirmed, or cancelled", () => {
       expect(validateOrderTransition("processing", "ready_for_collection").valid).toBe(true);
       expect(validateOrderTransition("processing", "out_for_delivery").valid).toBe(true);
+      expect(validateOrderTransition("processing", "completed").valid).toBe(true);
+      expect(validateOrderTransition("processing", "confirmed").valid).toBe(true);
       expect(validateOrderTransition("processing", "cancelled").valid).toBe(true);
+    });
+
+    it("should resolve Error A: allow ready_for_collection -> out_for_delivery when courier picks up package", () => {
+      const res = validateOrderTransition("ready_for_collection", "out_for_delivery");
+      expect(res.valid).toBe(true);
+    });
+
+    it("should resolve Error B: allow confirmed -> out_for_delivery when dispatching off-the-shelf items directly", () => {
+      const res = validateOrderTransition("confirmed", "out_for_delivery");
+      expect(res.valid).toBe(true);
+    });
+
+    it("should allow rework transitions from ready_for_collection or out_for_delivery back to processing or hub", () => {
+      expect(validateOrderTransition("ready_for_collection", "processing").valid).toBe(true);
+      expect(validateOrderTransition("out_for_delivery", "ready_for_collection").valid).toBe(true);
+      expect(validateOrderTransition("out_for_delivery", "processing").valid).toBe(true);
+    });
+
+    it("should support complete Home Delivery progression lifecycle", () => {
+      const deliverySteps = [
+        ["pending", "confirmed"],
+        ["confirmed", "processing"],
+        ["processing", "ready_for_collection"],
+        ["ready_for_collection", "out_for_delivery"],
+        ["out_for_delivery", "completed"],
+      ];
+
+      for (const [from, to] of deliverySteps) {
+        const check = validateOrderTransition(from, to, { deliveryType: "home_delivery" });
+        expect(check.valid).toBe(true);
+      }
+    });
+
+    it("should support complete Store Pickup progression lifecycle and guard against courier dispatch", () => {
+      const pickupSteps = [
+        ["pending", "confirmed"],
+        ["confirmed", "processing"],
+        ["processing", "ready_for_collection"],
+        ["ready_for_collection", "completed"],
+      ];
+
+      for (const [from, to] of pickupSteps) {
+        const check = validateOrderTransition(from, to, { deliveryType: "store_pickup" });
+        expect(check.valid).toBe(true);
+      }
+
+      // Guard: Store pickup orders should reject out_for_delivery courier stage unless admin overrides
+      const invalidPickupDispatch = validateOrderTransition("ready_for_collection", "out_for_delivery", {
+        deliveryType: "store_pickup",
+      });
+      expect(invalidPickupDispatch.valid).toBe(false);
+      expect(invalidPickupDispatch.error).toContain("Store pickup orders do not have courier delivery");
+
+      // With admin override, it is permitted
+      const overridePickupDispatch = validateOrderTransition("ready_for_collection", "out_for_delivery", {
+        deliveryType: "store_pickup",
+        allowAdminOverride: true,
+      });
+      expect(overridePickupDispatch.valid).toBe(true);
     });
 
     it("should allow fulfillment to terminal completed", () => {

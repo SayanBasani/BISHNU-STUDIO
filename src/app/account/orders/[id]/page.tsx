@@ -291,7 +291,7 @@ export default function OrderTrackingDetailPage() {
     {
       key: "completed",
       title: isDelivery ? "Delivered" : "Collected",
-      subtitle: "Fulfillment complete",
+      subtitle: isDelivery ? "Doorstep delivery complete" : "Fulfillment complete",
     },
   ];
 
@@ -383,9 +383,13 @@ export default function OrderTrackingDetailPage() {
         variant = "active";
         break;
       case "ready_for_collection":
-        title = "Ready for Counter Pickup";
-        desc = ev.customerMessage || "Order is packaged and waiting at Bishnu Studio counter.";
-        icon = Store;
+        title = isDelivery ? "Packed & Ready for Dispatch" : "Ready for Counter Pickup";
+        desc =
+          ev.customerMessage ||
+          (isDelivery
+            ? "Order is packaged and awaiting courier dispatch."
+            : "Order is packaged and waiting at Bishnu Studio counter.");
+        icon = isDelivery ? Package : Store;
         variant = "active";
         break;
       case "out_for_delivery":

@@ -7,6 +7,8 @@ import {
 } from "@/lib/perf";
 import { NextRequest, NextResponse } from "next/server";
 import { fetchPublicShopSettings } from "@/lib/public-settings";
+import { calculateDropdownStyle } from "@/components/NotificationBell";
+import { CANONICAL_PAYMENT_STATUSES } from "@/lib/order-state-machine";
 
 describe("BS-UI-01A: Payment Method Formatting & Separation", () => {
   it("should format known payment methods into human-readable labels", () => {
@@ -298,10 +300,118 @@ describe("Password Visibility & Admin UI Architecture Integrity", () => {
       "utf-8"
     );
 
-    expect(notifBellCode).toContain("updatePosition");
-    expect(notifBellCode).toContain("window.addEventListener(\"resize\"");
+    expect(notifBellCode).toContain("calculateDropdownStyle");
+    expect(notifBellCode).toContain("buttonRef");
     expect(notifBellCode).toContain("panelStyle");
     expect(notifBellCode).toContain("maxHeight");
+  });
+});
+
+describe("BS-OPS-02A: Order Fulfillment, Payment Enums & Collapsible Sidebar", () => {
+  const fs = require("fs");
+  const path = require("path");
+
+  it("should auto-increment queryCount in RequestTimer when database stages are measured", async () => {
+    const req = new NextRequest("http://localhost:3000/api/orders/BS-1001", {
+      headers: { "x-request-id": "req_perf_auto_inc_123" },
+    });
+
+    const timer = createRequestTimer(req);
+
+    // Measure stage with database prefix
+    await timer.measure("database.orders.fetch", async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+
+    await timer.measure("database.items.fetch", async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+
+    // Measure non-database stage
+    await timer.measure("validate_transition", async () => {
+      await new Promise((r) => setTimeout(r, 2));
+    });
+
+    const metrics = timer.getMetrics();
+    expect(metrics.queryCount).toBe(2); // Auto-incremented for 2 database stages!
+    expect(metrics.totalQueryDurationMs).toBeGreaterThan(0);
+    expect(metrics.stages.length).toBe(3);
+  });
+
+  it("should compute dropdown position synchronously to eliminate first-open misplaced flash", () => {
+    // Case 1: Initial mount before DOM reference exists (fallback positioning)
+    const initialFallback = calculateDropdownStyle(null);
+    expect(initialFallback.position).toBe("fixed");
+    expect(initialFallback.top).toBe("60px");
+    expect(initialFallback.right).toBe("16px");
+    expect(initialFallback.zIndex).toBe(60);
+
+    // Case 2: Desktop sidebar trigger (left: 40px, right: 80px - opening to the right)
+    const mockSidebarEl = {
+      getBoundingClientRect: () => ({
+        top: 20,
+        bottom: 56,
+        left: 40,
+        right: 80,
+        width: 40,
+        height: 36,
+      }),
+    };
+    const sidebarDropdown = calculateDropdownStyle(mockSidebarEl as any);
+    expect(sidebarDropdown.position).toBe("fixed");
+    expect(parseInt(String(sidebarDropdown.top))).toBe(64); // 56 + 8
+    expect(parseInt(String(sidebarDropdown.left))).toBe(40); // Opens rightwards into viewport!
+    expect(sidebarDropdown.zIndex).toBe(60);
+  });
+
+  it("should validate all canonical database payment statuses in PATCH /api/orders/[id]", () => {
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("unpaid");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("pending");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("pending_verification");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("awaiting_payment");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("paid");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("refunded");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("failed");
+    expect(CANONICAL_PAYMENT_STATUSES).toContain("review_required");
+  });
+
+  it("should provide collapsible desktop sidebar in admin layout with persisted localStorage state", () => {
+    const adminLayoutCode = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/admin/layout.tsx"),
+      "utf-8"
+    );
+
+    expect(adminLayoutCode).toContain("admin_sidebar_collapsed");
+    expect(adminLayoutCode).toContain("sidebarCollapsed");
+    expect(adminLayoutCode).toContain("toggleSidebar");
+    expect(adminLayoutCode).toContain("ChevronLeft");
+    expect(adminLayoutCode).toContain("ChevronRight");
+    expect(adminLayoutCode).toContain('sidebarCollapsed ? "md:w-20" : "md:w-64"');
+  });
+
+  it("should context-adapt fulfillment status options for store pickup vs home delivery", () => {
+    const orderDetailCode = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/admin/orders/[id]/page.tsx"),
+      "utf-8"
+    );
+
+    expect(orderDetailCode).toContain("isPickup ? (");
+    expect(orderDetailCode).toContain("Ready for Counter Pickup");
+    expect(orderDetailCode).toContain("Collected & Completed");
+    expect(orderDetailCode).toContain("Packed & Ready for Dispatch");
+    expect(orderDetailCode).toContain("Dispatched / Out for Delivery");
+    expect(orderDetailCode).toContain("Delivered & Completed");
+  });
+
+  it("should replace raw alerts with inline accessible banner messages in admin order details", () => {
+    const orderDetailCode = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/admin/orders/[id]/page.tsx"),
+      "utf-8"
+    );
+
+    expect(orderDetailCode).toContain("saveError");
+    expect(orderDetailCode).toContain("setSaveError");
+    expect(orderDetailCode).not.toContain("alert(err?.message");
   });
 });
 

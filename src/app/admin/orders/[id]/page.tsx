@@ -61,6 +61,7 @@ export default function AdminOrderDetailPage() {
   const [allowAdminOverride, setAllowAdminOverride] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Copy feedback states
   const [copiedText, setCopiedText] = useState<string | null>(null);
@@ -104,6 +105,7 @@ export default function AdminOrderDetailPage() {
     e.preventDefault();
     setSaving(true);
     setSaveSuccess(null);
+    setSaveError(null);
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PATCH",
@@ -130,7 +132,7 @@ export default function AdminOrderDetailPage() {
       await fetchOrderDetail();
       setTimeout(() => setSaveSuccess(null), 4000);
     } catch (err: any) {
-      alert(err?.message || "Failed to save order");
+      setSaveError(err?.message || "Failed to save order");
     } finally {
       setSaving(false);
     }
@@ -274,9 +276,34 @@ export default function AdminOrderDetailPage() {
       </div>
 
       {saveSuccess && (
-        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-          {saveSuccess}
+        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{saveSuccess}</span>
+          </div>
+          <button
+            onClick={() => setSaveSuccess(null)}
+            className="p-1 hover:bg-emerald-100 dark:hover:bg-emerald-900 rounded-md transition"
+            aria-label="Dismiss success message"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-bold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{saveError}</span>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            className="p-1 hover:bg-rose-100 dark:hover:bg-rose-900 rounded-md transition"
+            aria-label="Dismiss error message"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
@@ -793,9 +820,18 @@ export default function AdminOrderDetailPage() {
                 <option value="pending">Pending Review</option>
                 <option value="confirmed">Confirmed</option>
                 <option value="processing">Processing in Studio</option>
-                <option value="ready_for_collection">Ready for Pickup</option>
-                <option value="out_for_delivery">Out for Delivery</option>
-                <option value="completed">Completed & Delivered</option>
+                {isPickup ? (
+                  <>
+                    <option value="ready_for_collection">Ready for Counter Pickup</option>
+                    <option value="completed">Collected & Completed</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="ready_for_collection">Packed & Ready for Dispatch</option>
+                    <option value="out_for_delivery">Dispatched / Out for Delivery</option>
+                    <option value="completed">Delivered & Completed</option>
+                  </>
+                )}
                 <option value="cancelled">Cancelled</option>
               </select>
             </div>
@@ -810,9 +846,13 @@ export default function AdminOrderDetailPage() {
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-purple-500"
               >
                 <option value="unpaid">Unpaid (Awaiting payment)</option>
-                <option value="pending">Pending verification</option>
+                <option value="pending">Pending payment</option>
+                <option value="awaiting_payment">Awaiting payment</option>
+                <option value="pending_verification">Pending verification (Review UTR/Proof)</option>
                 <option value="paid">Paid (Confirmed received)</option>
+                <option value="failed">Payment failed</option>
                 <option value="refunded">Refunded</option>
+                <option value="review_required">Review required</option>
               </select>
             </div>
           </div>

@@ -74,6 +74,16 @@ export class RequestTimer {
       timestamp: now,
     });
 
+    const isDbQuery =
+      stageName.startsWith("database.") ||
+      stageName.startsWith("db.") ||
+      stageName.includes("query") ||
+      stageName.includes("sql");
+    if (isDbQuery) {
+      this.queryCount += 1;
+      this.totalQueryDurationMs += durationMs;
+    }
+
     if (isPerfLoggingEnabled()) {
       console.log(
         `[PERF] request=${this.requestId} stage=${stageName} duration_ms=${durationMs}`

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 import {
   Bell,
   Check,
@@ -37,6 +38,124 @@ export interface NotificationItem {
 interface NotificationBellProps {
   scope?: "customer" | "admin";
   viewAllUrl?: string;
+}
+
+// Module-level deduplication cache to share in-flight requests across concurrent mounted instances
+type NotificationListener = (data: { items: NotificationItem[]; unreadCount: number }) => void;
+
+const sharedInFlight: Record<string, Promise<{ items: NotificationItem[]; unreadCount: number } | null> | null> = {};
+const sharedListeners: Record<string, Set<NotificationListener>> = {
+  customer: new Set(),
+  admin: new Set(),
+};
+const lastFetchedData: Record<string, { items: NotificationItem[]; unreadCount: number } | null> = {
+  customer: null,
+  admin: null,
+};
+const lastFetchTimestamp: Record<string, number> = {
+  customer: 0,
+  admin: 0,
+};
+
+async function executeSharedFetch(scope: "customer" | "admin"): Promise<{ items: NotificationItem[]; unreadCount: number } | null> {
+  const now = Date.now();
+  // Return cached result if fetched within 2 seconds
+  if (lastFetchedData[scope] && now - lastFetchTimestamp[scope] < 2000) {
+    return lastFetchedData[scope];
+  }
+
+  if (sharedInFlight[scope]) {
+    return sharedInFlight[scope];
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const res = await fetch(`/api/notifications?scope=${scope}&limit=10`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.success) {
+        const payload = {
+          items: (data.items || []) as NotificationItem[],
+          unreadCount: (data.unreadCount || 0) as number,
+        };
+        lastFetchedData[scope] = payload;
+        lastFetchTimestamp[scope] = Date.now();
+        sharedListeners[scope]?.forEach((listener) => {
+          try {
+            listener(payload);
+          } catch {}
+        });
+        return payload;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      sharedInFlight[scope] = null;
+    }
+  })();
+
+  sharedInFlight[scope] = fetchPromise;
+  return fetchPromise;
+}
+
+export function calculateDropdownStyle(triggerEl: HTMLElement | null): React.CSSProperties {
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+
+  if (!triggerEl) {
+    return {
+      position: "fixed",
+      top: "60px",
+      right: "16px",
+      width: vw < 640 ? "calc(100vw - 24px)" : "384px",
+      maxWidth: "calc(100vw - 24px)",
+      zIndex: 60,
+    };
+  }
+
+  const rect = triggerEl.getBoundingClientRect();
+
+  if (vw < 640) {
+    // Mobile screens (< 640px): fixed viewport-anchored panel with 12px safe gutters
+    const top = Math.min(rect.bottom + 8, vh - 220);
+    const maxHeight = Math.max(220, vh - top - 16);
+    return {
+      position: "fixed",
+      top: `${Math.max(12, top)}px`,
+      left: "12px",
+      right: "12px",
+      width: "auto",
+      maxWidth: "calc(100vw - 24px)",
+      maxHeight: `${maxHeight}px`,
+      zIndex: 60,
+    };
+  } else {
+    // Tablet & Desktop (>= 640px)
+    const panelWidth = Math.min(384, vw - 24); // 384px (w-96)
+    let left: number;
+
+    // Check if trigger is too close to left screen edge (e.g. desktop sidebar where rect.right ~ 240px or collapsed at ~80px)
+    if (rect.right - panelWidth < 12) {
+      left = Math.max(12, Math.min(rect.left, vw - panelWidth - 12));
+    } else {
+      left = Math.max(12, Math.min(rect.right - panelWidth, vw - panelWidth - 12));
+    }
+
+    const top = Math.min(rect.bottom + 8, vh - 220);
+    const maxHeight = Math.max(260, Math.min(540, vh - top - 16));
+
+    return {
+      position: "fixed",
+      top: `${Math.max(12, top)}px`,
+      left: `${left}px`,
+      width: `${panelWidth}px`,
+      maxHeight: `${maxHeight}px`,
+      zIndex: 60,
+    };
+  }
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -90,123 +209,107 @@ export default function NotificationBell({
   viewAllUrl = "/account/notifications",
 }: NotificationBellProps) {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"all" | "unread">("all");
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [liveToast, setLiveToast] = useState<NotificationItem | null>(null);
-  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
 
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const latestNotifIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef<boolean>(true);
 
-  // Viewport-aware responsive position calculation
-  const updatePosition = useCallback(() => {
-    if (!dropdownRef.current) return;
-    const rect = dropdownRef.current.getBoundingClientRect();
-    const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
-    const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+  // Initialize with precomputed position to eliminate unpositioned first-open flash
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>(() =>
+    calculateDropdownStyle(null)
+  );
 
-    if (vw < 640) {
-      // Mobile screens (< 640px): fixed viewport-anchored panel with 12px safe gutters
-      const top = Math.min(rect.bottom + 8, vh - 220);
-      const maxHeight = Math.max(220, vh - top - 16);
-      setPanelStyle({
-        position: "fixed",
-        top: `${Math.max(12, top)}px`,
-        left: "12px",
-        right: "12px",
-        width: "auto",
-        maxWidth: "calc(100vw - 24px)",
-        maxHeight: `${maxHeight}px`,
-        zIndex: 60,
-      });
+  // Synchronous positioning on click before state commit
+  const handleToggle = () => {
+    if (!isOpen) {
+      const el = buttonRef.current || dropdownRef.current;
+      const coords = calculateDropdownStyle(el);
+      setPanelStyle(coords);
+      setIsOpen(true);
+      fetchNotifications();
     } else {
-      // Tablet & Desktop (>= 640px)
-      const panelWidth = Math.min(384, vw - 24); // 384px (w-96)
-      let left: number;
-
-      // Check if trigger is too close to left screen edge (e.g. desktop sidebar where rect.right ~ 240px):
-      // Opening to the left would overflow off-screen! Open to the right instead.
-      if (rect.right - panelWidth < 12) {
-        left = Math.max(12, Math.min(rect.left, vw - panelWidth - 12));
-      } else {
-        // Trigger is on the right side (e.g. top navbar), align panel right edge to trigger right edge
-        left = Math.max(12, Math.min(rect.right - panelWidth, vw - panelWidth - 12));
-      }
-
-      const top = Math.min(rect.bottom + 8, vh - 220);
-      const maxHeight = Math.max(260, Math.min(540, vh - top - 16));
-
-      setPanelStyle({
-        position: "fixed",
-        top: `${Math.max(12, top)}px`,
-        left: `${left}px`,
-        width: `${panelWidth}px`,
-        maxHeight: `${maxHeight}px`,
-        zIndex: 60,
-      });
+      setIsOpen(false);
     }
-  }, []);
+  };
 
-  // Update position when opened, resized, or scrolled
-  useEffect(() => {
+  // Keep position pinned to anchor on window resize or scroll
+  const useIsomorphicLayoutEffect =
+    typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
+
+  useIsomorphicLayoutEffect(() => {
     if (!isOpen) return;
 
-    updatePosition();
-    const handleScrollOrResize = () => updatePosition();
+    const syncPos = () => {
+      const el = buttonRef.current || dropdownRef.current;
+      setPanelStyle(calculateDropdownStyle(el));
+    };
 
-    window.addEventListener("resize", handleScrollOrResize);
-    window.addEventListener("scroll", handleScrollOrResize, true);
+    syncPos();
+    window.addEventListener("resize", syncPos);
+    window.addEventListener("scroll", syncPos, true);
 
     return () => {
-      window.removeEventListener("resize", handleScrollOrResize);
-      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", syncPos);
+      window.removeEventListener("scroll", syncPos, true);
     };
-  }, [isOpen, updatePosition]);
+  }, [isOpen]);
 
+  // Subscribe to shared poller updates
+  useEffect(() => {
+    const handleSharedUpdate = (data: { items: NotificationItem[]; unreadCount: number }) => {
+      setNotifications(data.items);
+      setUnreadCount(data.unreadCount);
 
-  // Fetch notifications
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/notifications?scope=${scope}&limit=10`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.success) {
-        const fetchedItems: NotificationItem[] = data.items || [];
-        setNotifications(fetchedItems);
-        setUnreadCount(data.unreadCount || 0);
-
-        // Check for live toast if new unread notification arrived
-        if (!initialLoadRef.current && fetchedItems.length > 0) {
-          const newest = fetchedItems[0];
-          if (
-            newest.id !== latestNotifIdRef.current &&
-            !newest.isRead &&
-            (newest.priority === "high" || newest.priority === "urgent" || scope === "admin")
-          ) {
-            setLiveToast(newest);
-            // Auto dismiss toast after 6 seconds
-            setTimeout(() => setLiveToast(null), 6000);
-          }
+      if (!initialLoadRef.current && data.items.length > 0) {
+        const newest = data.items[0];
+        if (
+          newest.id !== latestNotifIdRef.current &&
+          !newest.isRead &&
+          (newest.priority === "high" || newest.priority === "urgent" || scope === "admin")
+        ) {
+          setLiveToast(newest);
+          setTimeout(() => setLiveToast(null), 6000);
         }
-
-        if (fetchedItems.length > 0) {
-          latestNotifIdRef.current = fetchedItems[0].id;
-        }
-        initialLoadRef.current = false;
       }
-    } catch {
-      // Ignore network errors on polling
-    }
+
+      if (data.items.length > 0) {
+        latestNotifIdRef.current = data.items[0].id;
+      }
+      initialLoadRef.current = false;
+    };
+
+    sharedListeners[scope]?.add(handleSharedUpdate);
+
+    return () => {
+      sharedListeners[scope]?.delete(handleSharedUpdate);
+    };
   }, [scope]);
 
-  // Tab visibility-aware polling
+  // Fetch notifications via shared deduplicated poller
+  const fetchNotifications = useCallback(async () => {
+    // Skip unauthenticated customer polling to eliminate 401 spam
+    if (scope === "customer" && !authLoading && !user) {
+      return;
+    }
+    await executeSharedFetch(scope);
+  }, [scope, authLoading, user]);
+
+  // Visibility-aware background polling
   useEffect(() => {
+    // Skip unauthenticated customer polling
+    if (scope === "customer" && !authLoading && !user) {
+      return;
+    }
+
     fetchNotifications();
 
     let intervalId: NodeJS.Timeout | null = null;
@@ -243,7 +346,7 @@ export default function NotificationBell({
       stopPolling();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchNotifications]);
+  }, [fetchNotifications, scope, authLoading, user]);
 
   // Click outside to close
   useEffect(() => {
@@ -323,11 +426,9 @@ export default function NotificationBell({
     <div className="relative inline-block" ref={dropdownRef}>
       {/* Bell Trigger Button */}
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => {
-          setIsOpen(!isOpen);
-          if (!isOpen) fetchNotifications();
-        }}
+        onClick={handleToggle}
         aria-label={`Notifications (${unreadCount} unread)`}
         aria-expanded={isOpen}
         title="Notifications"

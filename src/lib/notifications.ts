@@ -126,19 +126,19 @@ export async function getNotifications(options: {
 
   const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
 
-  const items = await db
-    .select()
-    .from(notifications)
-    .where(whereClause)
-    .orderBy(desc(notifications.createdAt))
-    .limit(limit)
-    .offset(offset);
-
-  // Unread count
-  const unreadCount = await getUnreadNotificationCount({
-    recipientType,
-    recipientId,
-  });
+  const [items, unreadCount] = await Promise.all([
+    db
+      .select()
+      .from(notifications)
+      .where(whereClause)
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit)
+      .offset(offset),
+    getUnreadNotificationCount({
+      recipientType,
+      recipientId,
+    }),
+  ]);
 
   return {
     items,

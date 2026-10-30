@@ -35,6 +35,8 @@ import {
   Code2,
   RotateCcw,
   Bell,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
 
@@ -48,8 +50,28 @@ export default function AdminLayout({
   const { user, loading, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [adminBrandName, setAdminBrandName] = useState("Bishnu Studio");
   const mobileNavRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("admin_sidebar_collapsed");
+      if (saved === "true") {
+        setSidebarCollapsed(true);
+      }
+    } catch {}
+  }, []);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("admin_sidebar_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetch("/api/settings/shop")
@@ -162,14 +184,18 @@ export default function AdminLayout({
     },
   ];
 
-  const renderNavItems = () => (
-    <nav className="p-3 space-y-5 focus:outline-none" aria-label="Admin Navigation">
+  const renderNavItems = (isCollapsed: boolean = false) => (
+    <nav className={`p-3 ${isCollapsed ? "space-y-4" : "space-y-5"} focus:outline-none`} aria-label="Admin Navigation">
       {navSections.map((section, idx) => (
         <div key={idx}>
-          <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
-            {section.title}
-          </div>
-          <div className="space-y-0.5">
+          {!isCollapsed ? (
+            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5 truncate">
+              {section.title}
+            </div>
+          ) : idx > 0 ? (
+            <div className="my-2 border-t border-slate-200 dark:border-slate-800" />
+          ) : null}
+          <div className="space-y-1">
             {section.items.map((item) => {
               const Icon = item.icon;
               const isActive =
@@ -182,14 +208,22 @@ export default function AdminLayout({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                  title={item.label}
+                  className={`group relative flex items-center ${
+                    isCollapsed ? "justify-center px-2 py-2.5" : "gap-2.5 px-3 py-2"
+                  } rounded-xl text-xs font-semibold transition ${
                     isActive
                       ? "bg-purple-600 text-white shadow-sm"
                       : "text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
                   }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
-                  <span>{item.label}</span>
+                  {!isCollapsed && <span className="truncate">{item.label}</span>}
+                  {isCollapsed && (
+                    <span className="pointer-events-none absolute left-full ml-2 hidden group-hover:flex items-center px-2 py-1 rounded-md bg-slate-900 text-white dark:bg-slate-800 text-[11px] font-bold shadow-lg z-50 whitespace-nowrap">
+                      {item.label}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -199,19 +233,23 @@ export default function AdminLayout({
     </nav>
   );
 
-  const renderProfileFooter = () => (
-    <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-2 bg-slate-50/80 dark:bg-slate-950/40 shrink-0">
+  const renderProfileFooter = (isCollapsed: boolean = false) => (
+    <div className={`p-3 border-t border-slate-200 dark:border-slate-800 space-y-2 bg-slate-50/80 dark:bg-slate-950/40 shrink-0 ${isCollapsed ? "flex flex-col items-center" : ""}`}>
       <Link
         href="/"
-        className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+        title="Exit to Storefront"
+        className={`flex items-center ${
+          isCollapsed ? "justify-center p-2" : "gap-2 px-3 py-2"
+        } text-xs font-medium text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition`}
       >
-        <ArrowLeft className="w-4 h-4" /> Exit to Storefront
+        <ArrowLeft className="w-4 h-4 shrink-0" />
+        {!isCollapsed && <span className="truncate">Exit to Storefront</span>}
       </Link>
-      <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
+      <div className={`flex items-center ${isCollapsed ? "flex-col gap-2 pt-2" : "justify-between px-2 pt-2"} border-t border-slate-200 dark:border-slate-800/60 w-full`}>
         <Link
           href="/admin/settings/security"
-          className="flex items-center gap-2.5 min-w-0 pr-2 group"
-          title="Manage Admin Profile & Security"
+          className={`flex items-center ${isCollapsed ? "justify-center" : "gap-2.5 min-w-0 pr-2"} group`}
+          title={`Manage Admin Profile & Security (${user.fullName})`}
         >
           {user.avatarUrl ? (
             <img
@@ -224,12 +262,14 @@ export default function AdminLayout({
               {user.fullName.charAt(0).toUpperCase()}
             </div>
           )}
-          <div className="truncate">
-            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white transition truncate">
-              {user.fullName}
-            </p>
-            <p className="text-[10px] text-purple-600 dark:text-purple-400 font-mono truncate">Admin Settings &rarr;</p>
-          </div>
+          {!isCollapsed && (
+            <div className="truncate">
+              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white transition truncate">
+                {user.fullName}
+              </p>
+              <p className="text-[10px] text-purple-600 dark:text-purple-400 font-mono truncate">Admin Settings &rarr;</p>
+            </div>
+          )}
         </Link>
         <button
           onClick={handleAdminLogout}
@@ -331,26 +371,30 @@ export default function AdminLayout({
 
       {/* Desktop Fixed Viewport Sidebar */}
       <aside
-        className="hidden md:flex md:flex-col md:w-64 h-full shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-gray-300 shadow-sm z-30 transition-colors"
+        className={`hidden md:flex md:flex-col ${
+          sidebarCollapsed ? "md:w-20" : "md:w-64"
+        } h-full shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-gray-300 shadow-sm z-30 transition-all duration-300 ease-in-out`}
         aria-label="Desktop Admin Sidebar"
       >
         {/* Brand Header */}
-        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow">
+        <div className={`p-4 border-b border-slate-200 dark:border-slate-800 flex items-center ${sidebarCollapsed ? "flex-col gap-3 justify-center" : "justify-between"} shrink-0`}>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow shrink-0">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <div>
-              <span className="font-bold text-slate-900 dark:text-white text-sm block">
-                Admin Console
-              </span>
-              <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 block -mt-0.5">
-                {adminBrandName}
-              </span>
-            </div>
+            {!sidebarCollapsed && (
+              <div className="truncate">
+                <span className="font-bold text-slate-900 dark:text-white text-sm block truncate">
+                  Admin Console
+                </span>
+                <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 block -mt-0.5 truncate">
+                  {adminBrandName}
+                </span>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className={`flex items-center ${sidebarCollapsed ? "flex-col gap-2" : "gap-1"}`}>
             <NotificationBell scope="admin" viewAllUrl="/admin/notifications" />
             <button
               onClick={toggleTheme}
@@ -359,16 +403,24 @@ export default function AdminLayout({
             >
               {theme === "dark" ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
             </button>
+            <button
+              onClick={toggleSidebar}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
+            >
+              {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
           </div>
         </div>
 
         {/* Desktop Independent Vertically Scrollable Navigation Region */}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain">
-          {renderNavItems()}
+          {renderNavItems(sidebarCollapsed)}
         </div>
 
         {/* Desktop Fixed Bottom Footer */}
-        {renderProfileFooter()}
+        {renderProfileFooter(sidebarCollapsed)}
       </aside>
 
       {/* Main Content Area - Independently Scrollable */}
