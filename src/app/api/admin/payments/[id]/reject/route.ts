@@ -131,6 +131,26 @@ export async function POST(
       },
     });
 
+    // 5. Customer Notification
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      await createNotification({
+        recipientType: "customer",
+        recipientId: order.customerId,
+        category: "payment",
+        eventType: "payment_rejected",
+        title: `Payment Proof Rejected (${order.orderReference})`,
+        message: `Your payment proof (UTR: ${submission.transactionId}) was rejected: ${rejectionReason}. Please resubmit valid payment evidence.`,
+        entityType: "order",
+        entityId: order.id,
+        linkUrl: `/account/orders/${order.id}`,
+        priority: "high",
+        deduplicationKey: `notif_payment_rejected_${id}`,
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch payment rejection notification:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Payment submission rejected. Customer can resubmit proof.",

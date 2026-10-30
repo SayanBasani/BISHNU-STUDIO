@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { verifyPassword, createSession, setSessionCookie } from "@/lib/auth";
+import { verifyPassword, validateAdminCredentials, createSession, setSessionCookie } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAuditEvent, logAuthEvent } from "@/lib/audit";
 import { eq, or } from "drizzle-orm";
@@ -36,14 +36,17 @@ export async function POST(req: NextRequest) {
     const { identifier, password } = validation.data;
     const cleanIdentifier = identifier.trim().toLowerCase();
 
+    const configAdminEmail = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+    const isAdminEmailLogin = Boolean(configAdminEmail && cleanIdentifier === configAdminEmail);
+
     // Query by email OR phone
-    const userRows = await db
+    let userRows = await db
       .select()
       .from(users)
       .where(or(eq(users.email, cleanIdentifier), eq(users.phone, identifier.trim())))
       .limit(1);
 
-    if (userRows.length === 0) {
+    if (userRows.length === 0 && !isAdminEmailLogin) {
       await logAuthEvent({
         email: cleanIdentifier,
         eventType: "login_failure",
@@ -58,22 +61,43 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = userRows[0];
-    const passwordValid = await verifyPassword(password, user.passwordHash);
-    if (!passwordValid) {
-      await logAuthEvent({
-        userId: user.id,
-        email: user.email,
-        eventType: "login_failure",
-        ipAddress: ip,
-        userAgent,
-        status: "failure",
-        failureReason: "Incorrect password",
-      });
-      return NextResponse.json(
-        { error: "Invalid credentials. Please check your email/mobile and password." },
-        { status: 401 }
-      );
+    let user: any = userRows[0];
+
+    // If user is admin or logging in with admin email, use authoritative admin validation
+    if (isAdminEmailLogin || user?.role === "admin") {
+      const authResult = await validateAdminCredentials(cleanIdentifier, password);
+      if (!authResult.valid || !authResult.user) {
+        await logAuthEvent({
+          email: cleanIdentifier,
+          eventType: "login_failure",
+          ipAddress: ip,
+          userAgent,
+          status: "failure",
+          failureReason: authResult.error || "Invalid administrator credentials",
+        });
+        return NextResponse.json(
+          { error: authResult.error || "Invalid credentials. Please check your email/mobile and password." },
+          { status: 401 }
+        );
+      }
+      user = authResult.user;
+    } else {
+      const passwordValid = await verifyPassword(password, user.passwordHash);
+      if (!passwordValid) {
+        await logAuthEvent({
+          userId: user.id,
+          email: user.email,
+          eventType: "login_failure",
+          ipAddress: ip,
+          userAgent,
+          status: "failure",
+          failureReason: "Incorrect password",
+        });
+        return NextResponse.json(
+          { error: "Invalid credentials. Please check your email/mobile and password." },
+          { status: 401 }
+        );
+      }
     }
 
     // Check if account is blocked
@@ -103,7 +127,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Create session
-    const { sessionToken, expiresAt } = await createSession(user.id);
+    const { sessionToken, expiresAt } = await createSession(user.id, {
+      ipAddress: ip,
+      userAgent,
+    });
     setSessionCookie(sessionToken, expiresAt);
 
     await logAuditEvent({

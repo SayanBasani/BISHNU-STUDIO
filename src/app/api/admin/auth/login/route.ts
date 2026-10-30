@@ -65,7 +65,10 @@ export async function POST(req: NextRequest) {
     const adminUser = authResult.user;
 
     // Create session and set HTTP-only cookie
-    const { sessionToken, expiresAt } = await createSession(adminUser.id);
+    const { sessionToken, expiresAt } = await createSession(adminUser.id, {
+      ipAddress: ip,
+      userAgent,
+    });
     setSessionCookie(sessionToken, expiresAt);
 
     await logAuditEvent({

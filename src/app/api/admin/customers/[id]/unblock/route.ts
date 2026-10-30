@@ -28,6 +28,24 @@ export async function POST(
       ipAddress: ip,
     });
 
+    // Customer Notification
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      await createNotification({
+        recipientType: "customer",
+        recipientId: id,
+        category: "account",
+        eventType: "account_unblocked",
+        title: "Account Restored",
+        message: "Your Bishnu Studio account has been reviewed and restored to active status. You can now access all services.",
+        entityType: "user",
+        entityId: id,
+        priority: "high",
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch unblock notification:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Customer account restored to active status successfully.",

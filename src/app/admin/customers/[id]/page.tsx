@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 import { formatINR, formatDate } from "@/lib/utils";
 import {
   User,
@@ -28,15 +29,28 @@ import {
   UserCheck,
   AlertCircle,
   Clock,
+  KeyRound,
+  Laptop,
+  Smartphone,
+  Globe,
+  LogOut,
 } from "lucide-react";
 
 export default function AdminCustomerDetailPage() {
   const params = useParams();
   const id = params?.id as string;
+  const { user: currentAdmin } = useAuth();
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Active Sessions state
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [showForceLogoutModal, setShowForceLogoutModal] = useState(false);
+  const [forceLogoutLoading, setForceLogoutLoading] = useState(false);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
 
   // Block/Unblock action states
   const [showBlockModal, setShowBlockModal] = useState(false);
@@ -52,8 +66,68 @@ export default function AdminCustomerDetailPage() {
   useEffect(() => {
     if (id) {
       fetchCustomerDetail();
+      fetchSessions();
     }
   }, [id]);
+
+  const fetchSessions = async () => {
+    try {
+      setSessionsLoading(true);
+      const res = await fetch(`/api/admin/customers/${id}/sessions`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          setSessions(json.sessions || []);
+        }
+      }
+    } catch {
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const handleRevokeSession = async (sessionId: string) => {
+    try {
+      setRevokingSessionId(sessionId);
+      const res = await fetch(`/api/admin/customers/${id}/sessions`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || "Failed to revoke session");
+
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      setFeedbackMessage({ text: "Customer session revoked successfully." });
+    } catch (err: any) {
+      setFeedbackMessage({ text: err?.message || "Failed to revoke session", isError: true });
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
+  const handleForceLogoutAll = async () => {
+    try {
+      setForceLogoutLoading(true);
+      const res = await fetch(`/api/admin/customers/${id}/sessions`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || "Failed to force logout customer");
+
+      setSessions([]);
+      setShowForceLogoutModal(false);
+      setFeedbackMessage({
+        text: "All customer sessions terminated successfully. The customer will need to log in again.",
+      });
+    } catch (err: any) {
+      setFeedbackMessage({ text: err?.message || "Failed to force logout customer", isError: true });
+    } finally {
+      setForceLogoutLoading(false);
+    }
+  };
 
   const fetchCustomerDetail = async () => {
     try {
@@ -206,8 +280,22 @@ export default function AdminCustomerDetailPage() {
               Orders Placed: <span className="font-mono">{orders.length}</span>
             </div>
 
-            {!isAdmin && (
+            {isAdmin || currentAdmin?.id === customer.id ? (
+              <div className="px-3.5 py-1.5 rounded-xl bg-purple-100 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-300 text-xs font-bold flex items-center gap-1.5 shadow-xs">
+                <ShieldCheck className="w-3.5 h-3.5" /> Protected Administrator
+              </div>
+            ) : (
               <>
+                {/* Force Logout Button (visible when active sessions exist) */}
+                {sessions.length > 0 && !isBlocked && (
+                  <button
+                    onClick={() => setShowForceLogoutModal(true)}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                  >
+                    <LogOut className="w-3.5 h-3.5" /> Force Logout ({sessions.length})
+                  </button>
+                )}
+
                 {isBlocked ? (
                   <button
                     onClick={() => setShowUnblockModal(true)}
@@ -431,8 +519,92 @@ export default function AdminCustomerDetailPage() {
           )}
         </div>
 
-        {/* Right Column: Order History & Authentication Logs */}
+        {/* Right Column: Active Sessions, Order History & Authentication Logs */}
         <div className="lg:col-span-7 space-y-6">
+          {/* Active Device Sessions Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-purple-600" />
+                Active Device Sessions ({sessions.length})
+              </h2>
+
+              {sessions.length > 0 && !isAdmin && currentAdmin?.id !== customer.id && (
+                <button
+                  type="button"
+                  onClick={() => setShowForceLogoutModal(true)}
+                  className="px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs font-bold hover:bg-amber-100 transition flex items-center gap-1.5"
+                >
+                  <LogOut className="w-3.5 h-3.5" /> Force Logout All
+                </button>
+              )}
+            </div>
+
+            {sessionsLoading ? (
+              <div className="py-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-purple-600" /> Loading active sessions...
+              </div>
+            ) : sessions.length === 0 ? (
+              <p className="text-xs text-slate-400 italic py-4 text-center">
+                No active sessions. This customer is currently signed out on all devices.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {sessions.map((sess: any) => {
+                  const ua = sess.userAgent || "";
+                  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+                  const deviceLabel = isMobile ? "Mobile Device" : "Desktop / Laptop";
+
+                  return (
+                    <div
+                      key={sess.id}
+                      className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 text-xs flex items-start justify-between gap-3"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-950/80 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5">
+                          {isMobile ? <Smartphone className="w-4 h-4" /> : <Laptop className="w-4 h-4" />}
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 dark:text-white">
+                              {deviceLabel}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                              Active
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 font-mono">
+                            {ua || "Standard Web Browser"}
+                          </p>
+                          <div className="flex items-center gap-3 text-[10px] text-slate-400 dark:text-slate-500 pt-0.5">
+                            <span className="flex items-center gap-1 font-mono">
+                              <Globe className="w-3 h-3 text-slate-400" />
+                              {sess.ipAddress || "127.0.0.1"}
+                            </span>
+                            <span>•</span>
+                            <span>Last active: {sess.lastActiveAt ? formatDate(sess.lastActiveAt) : "Recently"}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {!isAdmin && currentAdmin?.id !== customer.id && (
+                        <button
+                          type="button"
+                          disabled={revokingSessionId === sess.id}
+                          onClick={() => handleRevokeSession(sess.id)}
+                          title="Revoke this session"
+                          className="px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0"
+                        >
+                          {revokingSessionId === sess.id ? "Revoking..." : "Revoke"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Order History */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
@@ -556,6 +728,54 @@ export default function AdminCustomerDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Force Logout Confirmation Modal */}
+      {showForceLogoutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Force Logout Customer</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{customer.fullName} ({customer.email})</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl text-xs text-amber-800 dark:text-amber-300 space-y-1">
+              <p className="font-bold">Terminates {sessions.length} active device session(s).</p>
+              <p>
+                The customer will be signed out on all devices immediately. Their account status remains <strong>Active</strong>, and they can sign in again anytime.
+              </p>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Note: To permanently prevent a customer from signing in, use <strong>Block Account</strong> instead.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={forceLogoutLoading}
+                onClick={() => setShowForceLogoutModal(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={forceLogoutLoading}
+                onClick={handleForceLogoutAll}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 transition"
+              >
+                {forceLogoutLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Confirm Force Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Block Modal */}
       {showBlockModal && (

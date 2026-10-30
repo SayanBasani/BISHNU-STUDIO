@@ -54,6 +54,24 @@ export async function POST(
       ipAddress: ip,
     });
 
+    // Customer Notification
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      await createNotification({
+        recipientType: "customer",
+        recipientId: id,
+        category: "account",
+        eventType: "account_blocked",
+        title: "Account Restricted",
+        message: `Your Bishnu Studio account has been restricted by administration. Reason: ${reason}. You may submit an appeal from the login page.`,
+        entityType: "user",
+        entityId: id,
+        priority: "urgent",
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch block notification:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Customer account successfully blocked and all active sessions terminated.",

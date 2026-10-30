@@ -31,6 +31,7 @@
 24. [Global Theme-Aware Scrollbar Architecture](#24-global-theme-aware-scrollbar-architecture)
 25. [Platform Generalization, Order Lifecycle, Returns & Logistics](#25-platform-generalization-order-lifecycle-returns--logistics)
 26. [Git Workflow, Branch Standards & Contributor Guidelines](#26-git-workflow-branch-standards--contributor-guidelines)
+27. [Notification Architecture, Authentication Security & Session Management](#27-notification-architecture-authentication-security--session-management)
 - [Appendix: Environment-Variable Reference Table](#appendix-environment-variable-reference-table)
 - [Developer & Credits Information](#developer--credits-information)
 
@@ -809,6 +810,105 @@ The Bishnu Studio repository is hosted on GitHub and maintains a clean, linear d
 - **No Secrets Exposure**: Never commit `.env`, `.env.local`, passwords, or private connection strings.
 - **No Force Pushing**: `git push --force` and destructive commands (`git reset --hard`) are strictly forbidden in normal workflow.
 - **No Empty Commits**: Do not create placeholder commits without real changes.
+
+---
+
+## 27. Notification Architecture, Authentication Security & Session Management
+
+This section documents the security, session invalidation, and real-time notification engine designed for Bishnu Studio administrators and customers.
+
+### A. Root Cause Analysis: Admin Credential Rotation & Session Staleness
+
+During an audit of administrator credential management, two architectural defects were identified and resolved:
+1. **Database Hash Precedence Blocked Environment Password Rotation**:
+   In `src/lib/auth.ts`, `validateAdminCredentials()` previously checked whether `existingUsers[0].passwordUpdatedAt` was set. If populated, authentication tested the presented password **exclusively** against the stored database bcrypt hash. When an administrator rotated `ADMIN_PASSWORD` in `.env.local` or environment variables, the system rejected the new credentials because it never evaluated them against the environment configuration.
+2. **Missing Session Fingerprinting Allowed Stale Admin Sessions**:
+   The `sessions` table lacked a credential version or fingerprint column. When an administrator logged in from Browser A, a 14-day session cookie was issued. If credentials were changed subsequently, Browser A remained permanently logged in until session expiry because `validateSession()` only checked `session.expiresAt > Date.now()`.
+
+### B. The Authoritative Environment Credential Engine
+
+Environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, or `ADMIN_PASSWORD_HASH`) are now the **primary, authoritative source of truth** for platform administration:
+- **Precedence**: When an administrator signs in via `/admin/login` or the main `/login` portal, the password is validated against the environment credentials first.
+- **Automatic Database Synchronization**: Upon successful authentication, the administrator user record in the database (`users.passwordHash` and `users.passwordUpdatedAt`) is automatically updated with the newly hashed password.
+- **Server Restart / Redeployment Requirement**: Next.js loads `.env.local` into `process.env` at Node.js server startup. Any modification to `.env.local` requires stopping and restarting the local development server (`Ctrl+C` and `npm run dev`) or triggering a redeployment in Vercel for production.
+
+### C. Admin Session Invalidation via Credential Fingerprint
+
+To prevent stale sessions from persisting after credential rotation:
+1. **Fingerprint Generation**:
+   A deterministic HMAC-SHA256 fingerprint is calculated via `getAdminCredentialFingerprint()`:
+   ```ts
+   // sha256(ADMIN_EMAIL : (ADMIN_PASSWORD | ADMIN_PASSWORD_HASH) : SESSION_SECRET)
+   ```
+2. **Version Stamping on Session Creation**:
+   When an admin logs in, `sessions.credentialVersion` is populated with the active fingerprint. Customer sessions receive `null`.
+3. **Instant Rejection & Purge**:
+   In `validateSession()` (and `requireAdminSession()`), if `user.role === 'admin'`, the session's `credentialVersion` is compared against `getAdminCredentialFingerprint()`. If mismatched (such as after `.env.local` rotation and server restart), the outdated session is **immediately deleted from the database** and rejected with `401 Unauthorized`.
+4. **Customer Isolation**:
+   Customer sessions do not depend on the admin credential fingerprint and remain 100% active and unaffected when admin credentials rotate.
+
+### D. Force Logout vs. Account Blocking in Admin Dashboard
+
+Session management and access restrictions are strictly separated into two distinct administrative operations:
+
+| Feature | Force Logout | Block Customer Account |
+| :--- | :--- | :--- |
+| **Primary Purpose** | Session hygiene, device de-authorization, compromised browser reset | Prevent malicious users, fraud prevention, spam mitigation |
+| **Database Effect** | Deletes rows from `sessions` table where `userId = customerId` | Sets `users.status = 'blocked'`, records `blockedReason`, `blockedCategory`, `blockedAt`, and deletes sessions |
+| **Customer Ability to Log In** | **Allowed**. The customer can immediately log in again using their valid credentials. | **Forbidden**. All subsequent login attempts are rejected with `403 Forbidden` and blocked details. |
+| **Customer Notification** | Emits high-priority security alert: *"Session Terminated — An administrator has logged you out of all active sessions. You can log in again anytime."* | Emits urgent alert: *"Account Restricted — Your Bishnu Studio account has been restricted by administration."* |
+| **Admin Self-Protection** | **Enforced**. Admins cannot force logout their own session or admin accounts through the customer endpoint. | **Enforced**. Administrator accounts can never be blocked (`role === 'admin'` check). |
+
+### E. Centralized Persistent Notification Engine
+
+A centralized notifications system is implemented in table 26 (`notifications`) across both SQLite (`./data/bishnu.db`) and Neon PostgreSQL:
+
+#### Notification Schema
+- `id`: Unique identifier (`notif_<uuid>`)
+- `recipientType`: `'admin'` \| `'customer'`
+- `recipientId`: Targeted user ID (or `null` for broadcast to all administrators)
+- `category`: `'order'` \| `'payment'` \| `'delivery'` \| `'return'` \| `'account'` \| `'system'`
+- `eventType`: Standardized lifecycle event string (e.g. `order_created`, `payment_verified`, `order_out_for_delivery`, `return_requested`, `force_logout`, `account_blocked`)
+- `title` & `message`: XSS-safe notification copy
+- `entityType` & `entityId`: Reference to target entity (`order`, `payment`, `return`, `user`)
+- `linkUrl`: Direct deep link (e.g. `/account/orders/[id]` or `/admin/orders/[id]`)
+- `isRead` & `readAt`: Read receipt tracking
+- `priority`: `'low'` \| `'normal'` \| `'high'` \| `'urgent'`
+- `deduplicationKey`: Idempotency key preventing duplicate notifications during rapid retries or polling
+
+#### Business Event Integration Points
+1. **Order Creation** (`POST /api/orders`):
+   - Customer notification: Order confirmation with order reference and total amount.
+   - Admin notification: High-priority new order alert with customer name and total amount.
+2. **Order Status & Tracking Updates** (`PATCH /api/orders/[id]`):
+   - Customer notification: Dispatched when status moves to `processing`, `ready_for_collection`, `out_for_delivery`, or `completed`, or when courier tracking details are attached. Private staff notes are strictly excluded.
+3. **Order Cancellation** (`POST /api/orders/[id]/cancel`):
+   - Customer and admin notifications confirming cancellation and inventory restoration.
+4. **Payment Proof Submission** (`POST /api/orders/[id]/payment`):
+   - Customer confirmation of payment proof receipt (with UTR reference).
+   - Admin alert requesting verification against bank records (flagged urgent if duplicate UTR detected).
+5. **Payment Verification & Rejection** (`POST /api/admin/payments/[id]/verify` & `reject`):
+   - Customer notification confirming verification and order confirmation, or rejection with reason and resubmission guidance.
+6. **Return Requests & Status** (`POST /api/returns` & `PATCH /api/returns/[id]`):
+   - Admin alert upon customer return request.
+   - Customer notifications when return is approved, pickup scheduled, or refund processed.
+7. **Security & Session Events** (`POST /api/admin/customers/[id]/sessions` & `block`):
+   - High-priority security alerts sent to customers upon session termination or account restriction.
+
+### F. Notification UI & Polling Architecture
+
+- **`NotificationBell` Component**:
+  Interactive bell icon with dynamic unread badge counter (`1`, `5`, `9+`), category-colored badges, relative timestamps, quick "Mark as Read" actions, and empty states.
+  - Placed in Customer Navbar (`src/components/Navbar.tsx`) when authenticated.
+  - Placed in Admin Top Header & Sidebar Header (`src/app/admin/layout.tsx`).
+- **Tab-Visibility-Aware Polling**:
+  Polling runs every 30 seconds but automatically **suspends** when the browser tab is hidden or backgrounded (`document.visibilityState === 'hidden'`). When the user returns to the tab, polling immediately wakes up and fetches the latest alerts.
+- **Live Event Toasts**:
+  When new high-priority or urgent notifications arrive (such as payment verifications, dispatch alerts, or new orders for admins), a non-intrusive toast notification slides into view with a direct "View Details" link.
+- **Full Notification Centers**:
+  Dedicated full-page notification management interfaces with filtering by read state and category, mark all as read, and notification dismissal:
+  - Customer: [`/account/notifications`](file:///account/notifications)
+  - Admin: [`/admin/notifications`](file:///admin/notifications)
 
 ---
 

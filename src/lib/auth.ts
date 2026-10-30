@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import * as React from "react";
 import { db } from "@/db";
 import { users, sessions, verificationTokens, accountAppeals } from "@/db/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, desc } from "drizzle-orm";
 
 export const SESSION_COOKIE_NAME = "bishnu_session";
 const SESSION_MAX_AGE_DAYS = parseInt(
@@ -34,15 +34,41 @@ export function generateOtp(length: number = 6): string {
   return crypto.randomInt(min, max + 1).toString();
 }
 
-export async function createSession(userId: string) {
+export function getAdminCredentialFingerprint(): string {
+  const email = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const secret = process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD_HASH || "";
+  const salt = process.env.SESSION_SECRET || "bishnu-studio-default-salt";
+  return crypto.createHmac("sha256", salt).update(`${email}:${secret}`).digest("hex");
+}
+
+export async function createSession(
+  userId: string,
+  metadata?: { userAgent?: string; ipAddress?: string }
+) {
   const sessionToken = crypto.randomBytes(32).toString("hex");
   const expiresAt = Date.now() + SESSION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  // Check if user is admin to stamp credential version fingerprint
+  const userRows = await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const isAdmin = userRows.length > 0 && userRows[0].role === "admin";
+  const credentialVersion = isAdmin ? getAdminCredentialFingerprint() : null;
 
   await db.insert(sessions).values({
     id: `sess_${crypto.randomUUID()}`,
     userId,
     sessionToken,
     expiresAt,
+    credentialVersion,
+    userAgent: metadata?.userAgent ? metadata.userAgent.slice(0, 500) : null,
+    ipAddress: metadata?.ipAddress ? metadata.ipAddress.slice(0, 100) : null,
+    lastActiveAt: now,
+    createdAt: now,
   });
 
   return { sessionToken, expiresAt };
@@ -54,6 +80,63 @@ export async function invalidateSession(sessionToken: string) {
 
 export async function invalidateAllUserSessions(userId: string) {
   await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
+export async function getUserSessions(userId: string) {
+  const now = Date.now();
+  const sessionList = await db
+    .select({
+      id: sessions.id,
+      userId: sessions.userId,
+      userAgent: sessions.userAgent,
+      ipAddress: sessions.ipAddress,
+      lastActiveAt: sessions.lastActiveAt,
+      createdAt: sessions.createdAt,
+      expiresAt: sessions.expiresAt,
+    })
+    .from(sessions)
+    .where(and(eq(sessions.userId, userId), gt(sessions.expiresAt, now)))
+    .orderBy(desc(sessions.lastActiveAt));
+
+  return sessionList;
+}
+
+export async function revokeSessionById(sessionId: string) {
+  await db.delete(sessions).where(eq(sessions.id, sessionId));
+  return { success: true };
+}
+
+export async function forceLogoutCustomer(userId: string, adminId: string) {
+  const userRows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (userRows.length === 0) {
+    throw new Error("Customer not found");
+  }
+  const user = userRows[0];
+  if (user.role === "admin") {
+    throw new Error("Cannot force logout an administrator account through customer session management");
+  }
+
+  // Delete all sessions for this customer across all devices
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+
+  // Note: Customer status is NOT set to blocked; they can log in again.
+  // Dispatch persistent security notification to the customer
+  try {
+    const { createNotification } = await import("@/lib/notifications");
+    await createNotification({
+      recipientType: "customer",
+      recipientId: userId,
+      category: "account",
+      eventType: "force_logout",
+      title: "Session Terminated",
+      message: "An administrator has terminated your active sessions. You can log in again at any time.",
+      priority: "high",
+    });
+  } catch (err) {
+    console.error("Failed to dispatch force logout notification:", err);
+  }
+
+  return { success: true, userId };
 }
 
 export async function blockCustomer({
@@ -160,6 +243,31 @@ export async function validateSession(sessionToken: string) {
     // Immediately invalidate all active sessions for blocked user
     await db.delete(sessions).where(eq(sessions.userId, user.id));
     return null;
+  }
+
+  // Admin credential invalidation check:
+  // If the user is an admin, ensure the session was created with the CURRENT admin credentials fingerprint.
+  if (user.role === "admin") {
+    const currentFingerprint = getAdminCredentialFingerprint();
+    if (!session.credentialVersion || session.credentialVersion !== currentFingerprint) {
+      // Credentials rotated or session issued under outdated credentials!
+      // Invalidate this session immediately across all devices
+      await db.delete(sessions).where(eq(sessions.id, session.id));
+      return null;
+    }
+  }
+
+  // Throttled update of lastActiveAt (only update if > 5 minutes since last recorded activity)
+  const lastActive = session.lastActiveAt ? Number(session.lastActiveAt) : 0;
+  if (!lastActive || now - lastActive > 5 * 60 * 1000) {
+    try {
+      await db
+        .update(sessions)
+        .set({ lastActiveAt: now })
+        .where(eq(sessions.id, session.id));
+    } catch {
+      // Non-blocking update failure
+    }
   }
 
   const { passwordHash: _, ...safeUser } = user;
@@ -335,32 +443,26 @@ export async function validateAdminCredentials(
     };
   }
 
-  // 1. Verify Email
+  // 1. Verify Email (case-insensitive, trimmed)
   const cleanInputEmail = email.trim().toLowerCase();
   const cleanConfigEmail = configuredEmail.trim().toLowerCase();
   if (cleanInputEmail !== cleanConfigEmail) {
     return { valid: false, error: "Invalid administrator credentials." };
   }
 
-  // 2. Fetch existing admin record from DB to check for updated database credentials
-  const existingUsers = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, cleanConfigEmail))
-    .limit(1);
-
+  // 2. Authoritative Environment Password Check
+  // Environment variables are the primary authority for administrator credentials.
   let isPasswordValid = false;
-
-  // A. Database credential precedence: If admin changed password in the UI, verify against database hash
-  if (existingUsers.length > 0 && existingUsers[0].passwordUpdatedAt) {
-    isPasswordValid = await bcrypt.compare(password, existingUsers[0].passwordHash);
-  }
-
-  // B. Environment variable bootstrap & recovery fallback:
-  if (!isPasswordValid) {
-    if (configuredHash) {
-      isPasswordValid = await bcrypt.compare(password, configuredHash);
-    } else if (configuredPassword) {
+  if (configuredHash) {
+    isPasswordValid = await bcrypt.compare(password, configuredHash);
+  } else if (configuredPassword) {
+    if (
+      configuredPassword.startsWith("$2a$") ||
+      configuredPassword.startsWith("$2b$") ||
+      configuredPassword.startsWith("$2y$")
+    ) {
+      isPasswordValid = await bcrypt.compare(password, configuredPassword);
+    } else {
       const inputBuf = Buffer.from(password);
       const configBuf = Buffer.from(configuredPassword);
       if (inputBuf.length === configBuf.length) {
@@ -369,43 +471,76 @@ export async function validateAdminCredentials(
     }
   }
 
+  // 3. Keep DB user in sync with authoritative environment credentials
+  const existingUsers = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, cleanConfigEmail))
+    .limit(1);
+
+  // If environment check didn't match, check database password hash (supports dashboard UI updates)
+  if (!isPasswordValid && existingUsers.length > 0 && existingUsers[0].passwordHash) {
+    isPasswordValid = await bcrypt.compare(password, existingUsers[0].passwordHash);
+  }
+
   if (!isPasswordValid) {
     return { valid: false, error: "Invalid administrator credentials." };
   }
 
-  // 3. Ensure admin user exists in DB and has admin role
+  const passHash = await hashPassword(password);
+  const now = Date.now();
   let adminUser: any;
+
   if (existingUsers.length > 0) {
     adminUser = existingUsers[0];
-    if (adminUser.role !== "admin") {
-      await db
-        .update(users)
-        .set({ role: "admin" })
-        .where(eq(users.id, adminUser.id));
-      adminUser.role = "admin";
-    }
+    await db
+      .update(users)
+      .set({
+        role: "admin",
+        status: "active",
+        passwordHash: passHash,
+        passwordUpdatedAt: now,
+      })
+      .where(eq(users.id, adminUser.id));
+
+    adminUser.role = "admin";
+    adminUser.status = "active";
+    adminUser.passwordUpdatedAt = now;
   } else {
     // Create admin user record on initial bootstrap
     const adminId = `usr_admin_${crypto.randomUUID().slice(0, 8)}`;
-    const passHash = await hashPassword(password);
+    let adminPhone = process.env.ADMIN_PHONE || "9876543210";
+    const existingPhone = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.phone, adminPhone))
+      .limit(1);
+    if (existingPhone.length > 0) {
+      adminPhone = `98${Date.now().toString().slice(-8)}`;
+    }
+
     await db.insert(users).values({
       id: adminId,
       fullName: process.env.ADMIN_NAME || "Bishnu Studio Admin",
       email: cleanConfigEmail,
-      phone: process.env.ADMIN_PHONE || "9876543210",
+      phone: adminPhone,
       passwordHash: passHash,
       role: "admin",
+      status: "active",
       isEmailVerified: true,
       isPhoneVerified: true,
+      passwordUpdatedAt: now,
     });
     adminUser = {
       id: adminId,
       fullName: process.env.ADMIN_NAME || "Bishnu Studio Admin",
       email: cleanConfigEmail,
-      phone: process.env.ADMIN_PHONE || "9876543210",
+      phone: adminPhone,
       role: "admin",
+      status: "active",
       isEmailVerified: true,
       isPhoneVerified: true,
+      passwordUpdatedAt: now,
     };
   }
 

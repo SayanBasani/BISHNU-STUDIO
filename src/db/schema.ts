@@ -35,4 +35,5 @@ export const shopUpiAccounts = (isPg ? pg.shopUpiAccounts : sq.shopUpiAccounts) 
 export const developerProfile = (isPg ? pg.developerProfile : sq.developerProfile) as typeof sq.developerProfile;
 export const orderReturns = (isPg ? pg.orderReturns : sq.orderReturns) as typeof sq.orderReturns;
 export const orderReturnItems = (isPg ? pg.orderReturnItems : sq.orderReturnItems) as typeof sq.orderReturnItems;
+export const notifications = (isPg ? pg.notifications : sq.notifications) as typeof sq.notifications;
 

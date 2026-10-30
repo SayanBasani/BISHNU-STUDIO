@@ -86,6 +86,40 @@ export async function POST(
       details: { orderReference: order.orderReference },
     });
 
+    // Dispatch persistent notifications
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      // Customer notification
+      await createNotification({
+        recipientType: "customer",
+        recipientId: order.customerId,
+        category: "order",
+        eventType: "order_cancelled",
+        title: `Order Cancelled (${order.orderReference})`,
+        message: `Order #${order.orderReference} has been cancelled successfully.`,
+        entityType: "order",
+        entityId: id,
+        linkUrl: `/account/orders/${id}`,
+        deduplicationKey: `notif_order_cancelled_${id}`,
+      });
+
+      // Admin notification
+      await createNotification({
+        recipientType: "admin",
+        category: "order",
+        eventType: "order_cancelled",
+        title: `Order Cancelled (${order.orderReference})`,
+        message: `Order #${order.orderReference} was cancelled by ${isAdmin ? "administrator" : "customer"}.`,
+        entityType: "order",
+        entityId: id,
+        linkUrl: `/admin/orders/${id}`,
+        priority: "high",
+        deduplicationKey: `notif_admin_order_cancelled_${id}`,
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch order cancellation notifications:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Order has been cancelled successfully.",

@@ -69,6 +69,10 @@ export const sessions = sqliteTable("sessions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   sessionToken: text("session_token").notNull().unique(),
+  credentialVersion: text("credential_version"),
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+  lastActiveAt: integer("last_active_at"),
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at")
     .notNull()
@@ -819,6 +823,38 @@ export const orderReturnItems = sqliteTable("order_return_items", {
   unitPriceSnapshot: real("unit_price_snapshot").notNull(),
   totalPriceSnapshot: real("total_price_snapshot").notNull(),
   createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
+// 26. Notifications
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey(), // notif_<uuid>
+  recipientType: text("recipient_type", { enum: ["admin", "customer"] }).notNull(),
+  recipientId: text("recipient_id").references(() => users.id, { onDelete: "cascade" }),
+  category: text("category", {
+    enum: ["order", "payment", "delivery", "return", "account", "system"],
+  })
+    .notNull()
+    .default("system"),
+  eventType: text("event_type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  entityType: text("entity_type", {
+    enum: ["order", "payment", "return", "user", "setting", "system"],
+  }),
+  entityId: text("entity_id"),
+  linkUrl: text("link_url"),
+  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  readAt: integer("read_at"),
+  priority: text("priority", { enum: ["low", "normal", "high", "urgent"] })
+    .notNull()
+    .default("normal"),
+  deduplicationKey: text("deduplication_key"),
+  createdAt: integer("created_at")
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer("updated_at")
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
 });

@@ -433,6 +433,40 @@ export async function POST(
       },
     });
 
+    // Dispatch persistent notifications
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      // Admin notification
+      await createNotification({
+        recipientType: "admin",
+        category: "payment",
+        eventType: "payment_proof_submitted",
+        title: `Payment Proof Submitted (${order.orderReference})`,
+        message: `Customer submitted payment proof (UTR: ${cleanTrId}) for ₹${(order.totalAmount / 100).toFixed(2)}. ${isDuplicateFlagged ? "FLAGGED: Possible duplicate." : "Requires verification."}`,
+        entityType: "payment",
+        entityId: submissionId,
+        linkUrl: `/admin/orders/${id}`,
+        priority: isDuplicateFlagged ? "urgent" : "high",
+        deduplicationKey: `notif_admin_pay_sub_${submissionId}`,
+      });
+
+      // Customer notification
+      await createNotification({
+        recipientType: "customer",
+        recipientId: auth.user.id,
+        category: "payment",
+        eventType: "payment_proof_submitted",
+        title: `Payment Proof Received (${order.orderReference})`,
+        message: `Your payment proof (UTR: ${cleanTrId}) has been submitted and is pending shop verification.`,
+        entityType: "payment",
+        entityId: submissionId,
+        linkUrl: `/account/orders/${id}`,
+        deduplicationKey: `notif_cust_pay_sub_${submissionId}`,
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch payment submission notifications:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: isCancelledOrder

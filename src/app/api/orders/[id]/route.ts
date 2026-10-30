@@ -416,6 +416,39 @@ export async function PATCH(
       },
     });
 
+    // Dispatch customer notification for status change or tracking update
+    if (
+      (orderStatus && orderStatus !== existingOrder.orderStatus) ||
+      (trackingNumber && trackingNumber !== existingOrder.trackingNumber)
+    ) {
+      try {
+        const { createNotification } = await import("@/lib/notifications");
+        const isDelivery =
+          orderStatus === "out_for_delivery" ||
+          Boolean(trackingNumber && trackingNumber !== existingOrder.trackingNumber);
+        const statusLabel = (orderStatus || existingOrder.orderStatus)
+          .replace(/_/g, " ")
+          .toUpperCase();
+        await createNotification({
+          recipientType: "customer",
+          recipientId: existingOrder.customerId,
+          category: isDelivery ? "delivery" : "order",
+          eventType: `order_${orderStatus || "updated"}`,
+          title: `Order #${existingOrder.orderReference}: ${statusLabel}`,
+          message: customerMsg,
+          entityType: "order",
+          entityId: id,
+          linkUrl: `/account/orders/${id}`,
+          priority:
+            orderStatus === "out_for_delivery" || orderStatus === "ready_for_collection"
+              ? "high"
+              : "normal",
+        });
+      } catch (notifErr) {
+        console.error("Failed to dispatch order status notification:", notifErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: "Order updated successfully",

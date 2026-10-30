@@ -323,6 +323,31 @@ export async function PATCH(
       },
     });
 
+    // Customer Notification
+    if (data.status && data.status !== existingReturn.status) {
+      try {
+        const { createNotification } = await import("@/lib/notifications");
+        await createNotification({
+          recipientType: "customer",
+          recipientId: existingReturn.customerId,
+          category: "return",
+          eventType: `return_${data.status}`,
+          title: `Return #${existingReturn.returnReference}: ${data.status.replace(/_/g, " ").toUpperCase()}`,
+          message: customerTimelineMsg,
+          entityType: "return",
+          entityId: id,
+          linkUrl: `/account/orders/${existingReturn.orderId}`,
+          priority:
+            data.status === "refund_processed" || data.status === "approved"
+              ? "high"
+              : "normal",
+          deduplicationKey: `notif_return_${id}_${data.status}`,
+        });
+      } catch (notifErr) {
+        console.error("Failed to dispatch return status notification:", notifErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: "Return request updated successfully",

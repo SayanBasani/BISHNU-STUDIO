@@ -25,7 +25,9 @@ import {
   ChevronRight,
   Lock,
   ExternalLink,
+  Bell,
 } from "lucide-react";
+import NotificationBell from "@/components/NotificationBell";
 
 let cachedNavShop: { shopName: string; logoUrl: string | null } | null = null;
 
@@ -180,6 +182,11 @@ export default function Navbar() {
                 )}
               </Link>
 
+              {/* Notification Bell (when authenticated) */}
+              {user && (
+                <NotificationBell scope="customer" viewAllUrl="/account/notifications" />
+              )}
+
               {/* Desktop User Account Menu */}
               {user ? (
                 <div className="relative hidden sm:block">
@@ -238,6 +245,15 @@ export default function Navbar() {
                       >
                         <Package className="w-4 h-4 text-gray-400" />
                         My Orders &amp; Tracking
+                      </Link>
+
+                      <Link
+                        href="/account/notifications"
+                        onClick={() => setUserDropdownOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
+                      >
+                        <Bell className="w-4 h-4 text-gray-400" />
+                        Notifications
                       </Link>
 
                       <Link
@@ -452,6 +468,18 @@ export default function Navbar() {
                         <div className="flex items-center gap-2.5">
                           <Package className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                           <span>My Orders &amp; Tracking</span>
+                        </div>
+                        <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                      </Link>
+
+                      <Link
+                        href="/account/notifications"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Bell className="w-4 h-4 text-pink-600 dark:text-pink-400" />
+                          <span>Notifications</span>
                         </div>
                         <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
                       </Link>

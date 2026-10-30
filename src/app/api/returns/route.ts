@@ -247,6 +247,40 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Dispatch persistent notifications
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      // Admin notification
+      await createNotification({
+        recipientType: "admin",
+        category: "return",
+        eventType: "return_requested",
+        title: `Return Requested (${returnReference})`,
+        message: `Customer requested a return for Order #${order.orderReference} (${reason.replace(/_/g, " ")}). Est. refund: ₹${calculatedRefundAmount.toFixed(2)}.`,
+        entityType: "return",
+        entityId: returnId,
+        linkUrl: `/admin/orders/${orderId}`,
+        priority: "high",
+        deduplicationKey: `notif_admin_return_${returnId}`,
+      });
+
+      // Customer notification
+      await createNotification({
+        recipientType: "customer",
+        recipientId: order.customerId,
+        category: "return",
+        eventType: "return_requested",
+        title: `Return Request Submitted (${returnReference})`,
+        message: `Your return request #${returnReference} for Order #${order.orderReference} has been submitted and is under review.`,
+        entityType: "return",
+        entityId: returnId,
+        linkUrl: `/account/orders/${orderId}`,
+        deduplicationKey: `notif_cust_return_${returnId}`,
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch return request notifications:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Return request submitted successfully. Our studio team will review your request.",

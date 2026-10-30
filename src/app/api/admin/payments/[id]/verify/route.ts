@@ -172,6 +172,26 @@ export async function POST(
       },
     });
 
+    // 6. Customer Notification
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      await createNotification({
+        recipientType: "customer",
+        recipientId: order.customerId,
+        category: "payment",
+        eventType: "payment_verified",
+        title: `Payment Verified (${order.orderReference})`,
+        message: `Your payment of ₹${submission.amount.toFixed(2)} (UTR: ${submission.transactionId}) has been verified. Order confirmed!`,
+        entityType: "order",
+        entityId: order.id,
+        linkUrl: `/account/orders/${order.id}`,
+        priority: "high",
+        deduplicationKey: `notif_payment_verified_${id}`,
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch payment verification notification:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: isCancelledReopening

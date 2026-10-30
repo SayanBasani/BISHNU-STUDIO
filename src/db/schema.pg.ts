@@ -58,6 +58,10 @@ export const sessions = pgTable("sessions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   sessionToken: text("session_token").notNull().unique(),
+  credentialVersion: text("credential_version"),
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+  lastActiveAt: bigint("last_active_at", { mode: "number" }),
   expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
 });
@@ -539,5 +543,25 @@ export const orderReturnItems = pgTable("order_return_items", {
   unitPriceSnapshot: doublePrecision("unit_price_snapshot").notNull(),
   totalPriceSnapshot: doublePrecision("total_price_snapshot").notNull(),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+});
+
+// 26. Notifications
+export const notifications = pgTable("notifications", {
+  id: text("id").primaryKey(), // notif_<uuid>
+  recipientType: text("recipient_type").notNull(), // 'admin' | 'customer'
+  recipientId: text("recipient_id").references(() => users.id, { onDelete: "cascade" }),
+  category: text("category").notNull().default("system"), // order, payment, delivery, return, account, system
+  eventType: text("event_type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  entityType: text("entity_type"), // order, payment, return, user, system
+  entityId: text("entity_id"),
+  linkUrl: text("link_url"),
+  isRead: boolean("is_read").notNull().default(false),
+  readAt: bigint("read_at", { mode: "number" }),
+  priority: text("priority").notNull().default("normal"), // low, normal, high, urgent
+  deduplicationKey: text("deduplication_key"),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
 });
 

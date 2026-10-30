@@ -350,6 +350,40 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Dispatch persistent notifications
+    try {
+      const { createNotification } = await import("@/lib/notifications");
+      // Customer notification
+      await createNotification({
+        recipientType: "customer",
+        recipientId: auth.user.id,
+        category: "order",
+        eventType: "order_created",
+        title: `Order Placed (${orderReference})`,
+        message: `Your order #${orderReference} for ₹${finalTotal.toLocaleString("en-IN")} has been placed successfully.`,
+        entityType: "order",
+        entityId: orderId,
+        linkUrl: `/account/orders/${orderId}`,
+        deduplicationKey: `notif_order_created_${orderId}`,
+      });
+
+      // Admin notification
+      await createNotification({
+        recipientType: "admin",
+        category: "order",
+        eventType: "new_order_received",
+        title: `New Order Received (${orderReference})`,
+        message: `New order #${orderReference} placed by ${auth.user.fullName || "Customer"} for ₹${finalTotal.toLocaleString("en-IN")}.`,
+        entityType: "order",
+        entityId: orderId,
+        linkUrl: `/admin/orders/${orderId}`,
+        priority: "high",
+        deduplicationKey: `notif_admin_order_created_${orderId}`,
+      });
+    } catch (notifErr) {
+      console.error("Failed to dispatch order creation notifications:", notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       orderId,

@@ -28,6 +28,7 @@ const registerSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const ip = req.headers.get("x-forwarded-for") || "127.0.0.1";
+    const userAgent = req.headers.get("user-agent") || undefined;
     const rateCheck = checkRateLimit(ip, "register", { limit: 5, windowMs: 60 * 1000 });
     if (!rateCheck.allowed) {
       return NextResponse.json(
@@ -100,7 +101,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Create session and set HTTP-only cookie
-    const { sessionToken, expiresAt } = await createSession(userId);
+    const { sessionToken, expiresAt } = await createSession(userId, {
+      ipAddress: ip,
+      userAgent,
+    });
     setSessionCookie(sessionToken, expiresAt);
 
     await logAuditEvent({
