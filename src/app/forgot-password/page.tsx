@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Printer, AlertCircle, CheckCircle2, Loader2, ArrowLeft } from "lucide-react";
+import PasswordInput from "@/components/ui/PasswordInput";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -154,14 +155,14 @@ export default function ForgotPasswordPage() {
               <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                 New Password (min 6 characters)
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={6}
                 placeholder="••••••••"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl input-theme text-sm"
+                autoComplete="new-password"
+                className="px-3.5 py-2.5 rounded-xl input-theme text-sm"
               />
             </div>
 

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { fetchPublicShopSettings } from "@/lib/public-settings";
 import {
   Printer,
   Shield,
@@ -50,28 +51,24 @@ export default function Footer() {
       return;
     }
 
-    fetch("/api/settings/shop")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        const payload = data?.settings || data?.shop;
-        if (payload) {
-          const loaded: ShopInfo = {
-            shopName: payload.shopName || "Bishnu Studio",
-            building: payload.building || "12/B Station Road",
-            street: payload.street || "Main Market",
-            landmark: payload.landmark,
-            city: payload.cityTown || payload.city || "Barasat",
-            state: payload.state || "West Bengal",
-            pinCode: payload.pinCode || "700001",
-            contactPhone: payload.contactPhone || "+91 98765 43210",
-            contactEmail: payload.contactEmail || "support@bishnustudio.com",
-            openingHours: payload.openingHours || "Mon – Sat: 9:00 AM – 9:00 PM",
-          };
-          cachedFooterShop = loaded;
-          setShop(loaded);
-        }
-      })
-      .catch(() => {});
+    fetchPublicShopSettings().then((payload) => {
+      if (payload) {
+        const loaded: ShopInfo = {
+          shopName: payload.shopName || "Bishnu Studio",
+          building: payload.building || "12/B Station Road",
+          street: payload.street || "Main Market",
+          landmark: payload.landmark,
+          city: payload.cityTown || payload.city || "Barasat",
+          state: payload.state || "West Bengal",
+          pinCode: payload.pinCode || "700001",
+          contactPhone: payload.contactPhone || "+91 98765 43210",
+          contactEmail: payload.contactEmail || "support@bishnustudio.com",
+          openingHours: payload.openingHours || "Mon – Sat: 9:00 AM – 9:00 PM",
+        };
+        cachedFooterShop = loaded;
+        setShop(loaded);
+      }
+    });
   }, []);
 
   return (

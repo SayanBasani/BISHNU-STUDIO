@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { formatINR, formatDate } from "@/lib/utils";
+import {
+  formatINR,
+  formatDate,
+  formatPaymentMethod,
+  getPaymentMethodBadgeClass,
+} from "@/lib/utils";
 import {
   Package,
   Search,
@@ -25,6 +30,9 @@ import {
   RefreshCw,
   Copy,
   Check,
+  CreditCard,
+  Smartphone,
+  Wallet,
 } from "lucide-react";
 
 export default function AdminOrdersPage() {
@@ -116,6 +124,25 @@ export default function AdminOrdersPage() {
       default:
         return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700";
     }
+  };
+
+  const getPaymentMethodIcon = (method?: string) => {
+    const norm = (method || "").toLowerCase();
+    if (norm.includes("upi")) {
+      return <Smartphone className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />;
+    }
+    if (norm.includes("online") || norm.includes("card")) {
+      return <CreditCard className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 shrink-0" />;
+    }
+    if (
+      norm.includes("collection") ||
+      norm.includes("delivery") ||
+      norm.includes("cash") ||
+      norm.includes("cod")
+    ) {
+      return <Wallet className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />;
+    }
+    return <CreditCard className="w-3.5 h-3.5 text-slate-500 shrink-0" />;
   };
 
   return (
@@ -253,8 +280,9 @@ export default function AdminOrdersPage() {
                     <th className="py-3 px-4">Fulfillment</th>
                     <th className="py-3 px-4 text-center">Items</th>
                     <th className="py-3 px-4 font-mono">Total</th>
-                    <th className="py-3 px-4">Payment</th>
-                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Payment Method</th>
+                    <th className="py-3 px-4">Payment Status</th>
+                    <th className="py-3 px-4">Order Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -347,28 +375,37 @@ export default function AdminOrdersPage() {
                           {formatINR(ord.totalAmount)}
                         </td>
 
-                        {/* Payment */}
-                        <td className="py-3.5 px-4">
+                        {/* Dedicated Payment Method Column */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           <span
-                            className={`inline-flex items-center gap-1 font-bold capitalize px-2.5 py-0.5 rounded-full text-[10px] border ${getPaymentBadge(
-                              ord.paymentStatus
+                            className={`inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-full text-[11px] border shadow-2xs ${getPaymentMethodBadgeClass(
+                              ord.paymentMethod
                             )}`}
                           >
-                            {ord.paymentStatus.replace(/_/g, " ")}
-                          </span>
-                          <span className="block text-[10px] text-slate-400 uppercase font-mono mt-0.5">
-                            {ord.paymentMethod.replace(/_/g, " ")}
+                            {getPaymentMethodIcon(ord.paymentMethod)}
+                            <span>{formatPaymentMethod(ord.paymentMethod)}</span>
                           </span>
                         </td>
 
-                        {/* Fulfillment Status */}
-                        <td className="py-3.5 px-4">
+                        {/* Payment Status Column */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           <span
-                            className={`inline-flex items-center font-bold capitalize px-2.5 py-0.5 rounded-full text-[10px] border ${getStatusBadge(
+                            className={`inline-flex items-center gap-1 font-bold capitalize px-2.5 py-1 rounded-full text-[11px] border ${getPaymentBadge(
+                              ord.paymentStatus
+                            )}`}
+                          >
+                            {ord.paymentStatus?.replace(/_/g, " ") || "Unpaid"}
+                          </span>
+                        </td>
+
+                        {/* Order Status Column */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center font-bold capitalize px-2.5 py-1 rounded-full text-[11px] border ${getStatusBadge(
                               ord.orderStatus
                             )}`}
                           >
-                            {ord.orderStatus.replace(/_/g, " ")}
+                            {ord.orderStatus?.replace(/_/g, " ") || "Pending"}
                           </span>
                         </td>
 
@@ -454,22 +491,47 @@ export default function AdminOrdersPage() {
                     </div>
                   </div>
 
-                  {/* Status Badges */}
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <span
-                      className={`font-bold capitalize px-2 py-0.5 rounded-full text-[10px] border ${getStatusBadge(
-                        ord.orderStatus
-                      )}`}
-                    >
-                      {ord.orderStatus.replace(/_/g, " ")}
-                    </span>
-                    <span
-                      className={`font-bold capitalize px-2 py-0.5 rounded-full text-[10px] border ${getPaymentBadge(
-                        ord.paymentStatus
-                      )}`}
-                    >
-                      {ord.paymentStatus}
-                    </span>
+                  {/* Payment Method, Payment Status & Order Status */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        Payment Method:
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1.5 font-bold px-2.5 py-0.5 rounded-full text-[10px] border ${getPaymentMethodBadgeClass(
+                          ord.paymentMethod
+                        )}`}
+                      >
+                        {getPaymentMethodIcon(ord.paymentMethod)}
+                        <span>{formatPaymentMethod(ord.paymentMethod)}</span>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        Payment Status:
+                      </span>
+                      <span
+                        className={`font-bold capitalize px-2.5 py-0.5 rounded-full text-[10px] border ${getPaymentBadge(
+                          ord.paymentStatus
+                        )}`}
+                      >
+                        {ord.paymentStatus?.replace(/_/g, " ") || "Unpaid"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        Order Status:
+                      </span>
+                      <span
+                        className={`font-bold capitalize px-2.5 py-0.5 rounded-full text-[10px] border ${getStatusBadge(
+                          ord.orderStatus
+                        )}`}
+                      >
+                        {ord.orderStatus?.replace(/_/g, " ") || "Pending"}
+                      </span>
+                    </div>
                   </div>
 
                   {/* View Details Button */}

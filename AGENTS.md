@@ -128,3 +128,64 @@ This document establishes permanent operating rules, quality standards, and Git 
    - Keep `.gitignore` strictly maintained and verified.
 3. **Report Exposure Safely**:
    If an accidental secret exposure is ever detected in local files, report it clearly to the user without printing or logging the actual secret value.
+
+---
+
+## 8. Permanent Mandatory Post-Task Reporting Standard
+
+After completing every implementation task, the agent MUST structure its final report using the following mandatory sections in clear, beginner-friendly language:
+
+### 1. What was the problem?
+Explain the original issue or requirement in plain, accessible terms without jargon.
+
+### 2. What did you change?
+Provide a comprehensive list of:
+- Files created
+- Files modified
+- Files deleted (if any)
+- Database schemas / migrations changed
+- API routes updated
+- UI components modified
+For each important file, explain what was changed and why.
+
+### 3. Visual changes
+Explain explicitly what the user or administrator will see differently on desktop, tablet, and mobile screens. If there are no visual changes, state so explicitly.
+
+### 4. Functional/actionable changes
+Explain what new actions users and administrators can now perform and what new behaviors are enabled.
+
+### 5. What should I manually test?
+Provide concrete, step-by-step instructions that the user can follow in the browser:
+- Page or URL to open
+- Buttons or interactions to trigger
+- Expected visible result
+- Indicators that would signal a failure
+
+### 6. Performance report
+Always include actual measurements:
+- Request timings and correlation IDs
+- Measured backend stage durations (authentication, database queries, storage, serialization)
+- In-flight request deduplication improvements
+- Query count observations
+
+### 7. Automated test results
+List actual commands executed and results, clearly distinguishing:
+- PASSED
+- FAILED
+- NOT RUN
+- BLOCKED
+
+### 8. GitHub synchronization
+Report:
+- Commit message
+- Commit SHA
+- Branch name
+- Remote push status
+- Final working-tree cleanliness
+
+### 9. Remaining problems
+List any incomplete work, known limitations, or items requiring manual user configuration. Never conceal incomplete work.
+
+### 10. Future work suggestions
+Highlight relevant next steps and improvements directly related to the task.
+

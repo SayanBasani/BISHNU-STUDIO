@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { Printer, AlertCircle, Loader2 } from "lucide-react";
+import PasswordInput from "@/components/ui/PasswordInput";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -134,14 +135,14 @@ export default function RegisterPage() {
               <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                 Password (min 6 characters) <span className="text-red-500">*</span>
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={6}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl input-theme text-sm"
+                autoComplete="new-password"
+                className="px-3.5 py-2.5 rounded-xl input-theme text-sm"
               />
             </div>
           </div>

@@ -96,10 +96,77 @@ export default function NotificationBell({
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [liveToast, setLiveToast] = useState<NotificationItem | null>(null);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const latestNotifIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef<boolean>(true);
+
+  // Viewport-aware responsive position calculation
+  const updatePosition = useCallback(() => {
+    if (!dropdownRef.current) return;
+    const rect = dropdownRef.current.getBoundingClientRect();
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+
+    if (vw < 640) {
+      // Mobile screens (< 640px): fixed viewport-anchored panel with 12px safe gutters
+      const top = Math.min(rect.bottom + 8, vh - 220);
+      const maxHeight = Math.max(220, vh - top - 16);
+      setPanelStyle({
+        position: "fixed",
+        top: `${Math.max(12, top)}px`,
+        left: "12px",
+        right: "12px",
+        width: "auto",
+        maxWidth: "calc(100vw - 24px)",
+        maxHeight: `${maxHeight}px`,
+        zIndex: 60,
+      });
+    } else {
+      // Tablet & Desktop (>= 640px)
+      const panelWidth = Math.min(384, vw - 24); // 384px (w-96)
+      let left: number;
+
+      // Check if trigger is too close to left screen edge (e.g. desktop sidebar where rect.right ~ 240px):
+      // Opening to the left would overflow off-screen! Open to the right instead.
+      if (rect.right - panelWidth < 12) {
+        left = Math.max(12, Math.min(rect.left, vw - panelWidth - 12));
+      } else {
+        // Trigger is on the right side (e.g. top navbar), align panel right edge to trigger right edge
+        left = Math.max(12, Math.min(rect.right - panelWidth, vw - panelWidth - 12));
+      }
+
+      const top = Math.min(rect.bottom + 8, vh - 220);
+      const maxHeight = Math.max(260, Math.min(540, vh - top - 16));
+
+      setPanelStyle({
+        position: "fixed",
+        top: `${Math.max(12, top)}px`,
+        left: `${left}px`,
+        width: `${panelWidth}px`,
+        maxHeight: `${maxHeight}px`,
+        zIndex: 60,
+      });
+    }
+  }, []);
+
+  // Update position when opened, resized, or scrolled
+  useEffect(() => {
+    if (!isOpen) return;
+
+    updatePosition();
+    const handleScrollOrResize = () => updatePosition();
+
+    window.addEventListener("resize", handleScrollOrResize);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+
+    return () => {
+      window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+    };
+  }, [isOpen, updatePosition]);
+
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
@@ -321,11 +388,12 @@ export default function NotificationBell({
       {/* Notifications Dropdown */}
       {isOpen && (
         <div
-          className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 origin-top-right text-gray-900 dark:text-slate-100"
+          style={panelStyle}
+          className="rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 origin-top flex flex-col text-gray-900 dark:text-slate-100"
           role="menu"
         >
           {/* Header */}
-          <div className="px-4 py-3 bg-gray-50/70 dark:bg-slate-950/50 border-b border-gray-100 dark:border-slate-800/80 flex items-center justify-between">
+          <div className="shrink-0 px-4 py-3 bg-gray-50/70 dark:bg-slate-950/50 border-b border-gray-100 dark:border-slate-800/80 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="font-bold text-sm tracking-tight">Notifications</span>
               {unreadCount > 0 && (
@@ -349,7 +417,7 @@ export default function NotificationBell({
           </div>
 
           {/* Filter Tabs */}
-          <div className="flex border-b border-gray-100 dark:border-slate-800 text-xs px-3 pt-2 gap-2">
+          <div className="shrink-0 flex border-b border-gray-100 dark:border-slate-800 text-xs px-3 pt-2 gap-2">
             <button
               type="button"
               onClick={() => setActiveTab("all")}
@@ -375,7 +443,7 @@ export default function NotificationBell({
           </div>
 
           {/* Notification List */}
-          <div className="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800/60 overscroll-contain">
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-gray-100 dark:divide-slate-800/60 overscroll-contain">
             {filteredNotifications.length === 0 ? (
               <div className="py-10 text-center px-4">
                 <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-2 text-gray-400">
@@ -446,7 +514,7 @@ export default function NotificationBell({
           </div>
 
           {/* Footer View All Link */}
-          <div className="p-2.5 bg-gray-50 dark:bg-slate-950/80 border-t border-gray-100 dark:border-slate-800 text-center">
+          <div className="shrink-0 p-2.5 bg-gray-50 dark:bg-slate-950/80 border-t border-gray-100 dark:border-slate-800 text-center">
             <Link
               href={viewAllUrl}
               onClick={() => setIsOpen(false)}

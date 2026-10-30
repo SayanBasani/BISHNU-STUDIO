@@ -22,6 +22,7 @@ import { getShopSettings } from "@/lib/settings";
 import { eq, desc, inArray } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
+import { createRequestTimer } from "@/lib/perf";
 
 export const dynamic = "force-dynamic";
 
@@ -402,10 +403,16 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const timer = createRequestTimer(req);
   try {
-    const auth = await getAuthSession();
+    const auth = await timer.measure("authentication", async () => {
+      return await getAuthSession();
+    });
+
     if (!auth?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return timer.finish(
+        NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      );
     }
 
     const { searchParams } = new URL(req.url);
@@ -449,7 +456,9 @@ export async function GET(req: NextRequest) {
         };
       });
 
-      return NextResponse.json({ success: true, orders: formatted });
+      return timer.finish(
+        NextResponse.json({ success: true, orders: formatted })
+      );
     } else {
       // Admins see all orders with pagination, search, filters, customer contact, and delivery summary
       const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
@@ -555,22 +564,26 @@ export async function GET(req: NextRequest) {
         };
       });
 
-      return NextResponse.json({
-        success: true,
-        orders: formattedOrders,
-        pagination: {
-          total,
-          page: all ? 1 : page,
-          limit: all ? total : limit,
-          totalPages: all ? 1 : totalPages,
-        },
-      });
+      return timer.finish(
+        NextResponse.json({
+          success: true,
+          orders: formattedOrders,
+          pagination: {
+            total,
+            page: all ? 1 : page,
+            limit: all ? total : limit,
+            totalPages: all ? 1 : totalPages,
+          },
+        })
+      );
     }
   } catch (error: any) {
     console.error("Failed to fetch orders:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch orders." },
-      { status: 500 }
+    return timer.finish(
+      NextResponse.json(
+        { error: "Failed to fetch orders." },
+        { status: 500 }
+      )
     );
   }
 }

@@ -24,20 +24,32 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Module-level in-flight promise deduplicator to prevent concurrent round-trips
+let inFlightMePromise: Promise<any> | null = null;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refreshUser = async () => {
     try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.authenticated) {
-          setUser(data.user);
-        } else {
-          setUser(null);
-        }
+      if (!inFlightMePromise) {
+        inFlightMePromise = fetch("/api/auth/me", { cache: "no-store" })
+          .then(async (res) => {
+            if (res.ok) {
+              return await res.json();
+            }
+            return { authenticated: false, user: null };
+          })
+          .catch(() => ({ authenticated: false, user: null }))
+          .finally(() => {
+            inFlightMePromise = null;
+          });
+      }
+
+      const data = await inFlightMePromise;
+      if (data && data.authenticated && data.user) {
+        setUser(data.user);
       } else {
         setUser(null);
       }

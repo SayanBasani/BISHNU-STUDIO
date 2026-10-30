@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { Printer, AlertCircle, Loader2 } from "lucide-react";
+import PasswordInput from "@/components/ui/PasswordInput";
 
 export const dynamic = "force-dynamic";
 
@@ -98,13 +99,12 @@ function LoginForm() {
               Forgot password?
             </Link>
           </div>
-          <input
-            type="password"
+          <PasswordInput
             required
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl input-theme text-sm"
+            className="px-3.5 py-2.5 rounded-xl input-theme text-sm"
           />
         </div>
 

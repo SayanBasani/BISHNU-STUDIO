@@ -3,7 +3,12 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { formatINR, formatDate } from "@/lib/utils";
+import {
+  formatINR,
+  formatDate,
+  formatPaymentMethod,
+  getPaymentMethodBadgeClass,
+} from "@/lib/utils";
 import {
   Package,
   ArrowLeft,
@@ -416,10 +421,24 @@ export default function AdminOrderDetailPage() {
                 {formatINR(order.totalAmount)}
               </span>
             </div>
-            <div className="pt-1 flex justify-between items-center text-[11px]">
-              <span className="text-slate-400">Payment Channel:</span>
-              <span className="font-semibold uppercase font-mono text-purple-600 dark:text-purple-400">
-                {order.paymentMethod.replace(/_/g, " ")}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">
+              <span className="text-slate-500 dark:text-slate-400 font-semibold">Payment Method:</span>
+              <span
+                className={`inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-full text-[11px] border ${getPaymentMethodBadgeClass(
+                  order.paymentMethod
+                )}`}
+              >
+                {formatPaymentMethod(order.paymentMethod)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-slate-500 dark:text-slate-400 font-semibold">Payment Status:</span>
+              <span
+                className={`inline-flex items-center font-bold capitalize px-2.5 py-0.5 rounded-full text-[11px] border ${getPaymentBadge(
+                  order.paymentStatus
+                )}`}
+              >
+                {order.paymentStatus?.replace(/_/g, " ") || "Unpaid"}
               </span>
             </div>
           </div>
@@ -602,10 +621,29 @@ export default function AdminOrderDetailPage() {
 
       {/* SECTION 4: PAYMENT RECONCILIATION & UTR AUDIT */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          Payment Reconciliation & Proof Verification
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            Payment Reconciliation & Proof Verification
+          </h3>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-400">Method:</span>
+            <span
+              className={`inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-full text-[11px] border ${getPaymentMethodBadgeClass(
+                order.paymentMethod
+              )}`}
+            >
+              {formatPaymentMethod(order.paymentMethod)}
+            </span>
+            <span
+              className={`inline-flex items-center font-bold capitalize px-2.5 py-0.5 rounded-full text-[11px] border ${getPaymentBadge(
+                order.paymentStatus
+              )}`}
+            >
+              {order.paymentStatus?.replace(/_/g, " ") || "Unpaid"}
+            </span>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
           <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">

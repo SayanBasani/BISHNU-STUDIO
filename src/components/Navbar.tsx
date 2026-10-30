@@ -28,6 +28,7 @@ import {
   Bell,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
+import { fetchPublicShopSettings } from "@/lib/public-settings";
 
 let cachedNavShop: { shopName: string; logoUrl: string | null } | null = null;
 
@@ -49,20 +50,16 @@ export default function Navbar() {
       setShopBrand(cachedNavShop);
       return;
     }
-    fetch("/api/settings/shop")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        const payload = data?.settings || data?.shop;
-        if (payload?.shopName) {
-          const loaded = {
-            shopName: payload.shopName || "Bishnu Studio",
-            logoUrl: payload.logoUrl || "/logo.png",
-          };
-          cachedNavShop = loaded;
-          setShopBrand(loaded);
-        }
-      })
-      .catch(() => {});
+    fetchPublicShopSettings().then((payload) => {
+      if (payload?.shopName) {
+        const loaded = {
+          shopName: payload.shopName || "Bishnu Studio",
+          logoUrl: payload.logoUrl || "/logo.png",
+        };
+        cachedNavShop = loaded;
+        setShopBrand(loaded);
+      }
+    });
   }, []);
 
   // Close mobile drawer on route change

@@ -466,7 +466,9 @@ export default function AdminSecurityPage() {
                     type="button"
                     onClick={() => setShowCurrent(!showCurrent)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                    tabIndex={-1}
+                    aria-label={showCurrent ? "Hide password" : "Show password"}
+                    title={showCurrent ? "Hide password" : "Show password"}
+                    tabIndex={0}
                   >
                     {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -494,7 +496,9 @@ export default function AdminSecurityPage() {
                     type="button"
                     onClick={() => setShowNew(!showNew)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                    tabIndex={-1}
+                    aria-label={showNew ? "Hide password" : "Show password"}
+                    title={showNew ? "Hide password" : "Show password"}
+                    tabIndex={0}
                   >
                     {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -519,7 +523,9 @@ export default function AdminSecurityPage() {
                     type="button"
                     onClick={() => setShowConfirm(!showConfirm)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                    tabIndex={-1}
+                    aria-label={showConfirm ? "Hide password" : "Show password"}
+                    title={showConfirm ? "Hide password" : "Show password"}
+                    tabIndex={0}
                   >
                     {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
