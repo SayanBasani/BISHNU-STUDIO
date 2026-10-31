@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // 1. Users
 export const users = sqliteTable("users", {
@@ -37,47 +37,60 @@ export const users = sqliteTable("users", {
 
 
 // 2. User Addresses (Multiple saved addresses - Flipkart/Amazon style)
-export const userAddresses = sqliteTable("user_addresses", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  recipientName: text("recipient_name").notNull().default(""),
-  recipientPhone: text("recipient_phone").notNull().default(""),
-  addressType: text("address_type", { enum: ["home", "work", "other"] })
-    .notNull()
-    .default("home"),
-  label: text("label").notNull().default("Home"),
-  houseBuilding: text("house_building").notNull(),
-  streetLocality: text("street_locality").notNull(),
-  landmark: text("landmark"),
-  cityTown: text("city_town").notNull(),
-  state: text("state").notNull(),
-  pinCode: text("pin_code").notNull(),
-  isDefault: integer("is_default", { mode: "boolean" })
-    .notNull()
-    .default(true),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const userAddresses = sqliteTable(
+  "user_addresses",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientName: text("recipient_name").notNull().default(""),
+    recipientPhone: text("recipient_phone").notNull().default(""),
+    addressType: text("address_type", { enum: ["home", "work", "other"] })
+      .notNull()
+      .default("home"),
+    label: text("label").notNull().default("Home"),
+    houseBuilding: text("house_building").notNull(),
+    streetLocality: text("street_locality").notNull(),
+    landmark: text("landmark"),
+    cityTown: text("city_town").notNull(),
+    state: text("state").notNull(),
+    pinCode: text("pin_code").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    userIdx: index("idx_user_addresses_user").on(table.userId),
+  })
+);
 
 // 3. User Sessions
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  sessionToken: text("session_token").notNull().unique(),
-  credentialVersion: text("credential_version"),
-  userAgent: text("user_agent"),
-  ipAddress: text("ip_address"),
-  lastActiveAt: integer("last_active_at"),
-  expiresAt: integer("expires_at").notNull(),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionToken: text("session_token").notNull().unique(),
+    credentialVersion: text("credential_version"),
+    userAgent: text("user_agent"),
+    ipAddress: text("ip_address"),
+    lastActiveAt: integer("last_active_at"),
+    expiresAt: integer("expires_at").notNull(),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    tokenIdx: index("idx_sessions_token").on(table.sessionToken),
+    userExpiresIdx: index("idx_sessions_user_expires").on(table.userId, table.expiresAt),
+  })
+);
 
 // 4. Verification Tokens (OTP & Reset Tokens)
 export const verificationTokens = sqliteTable("verification_tokens", {
@@ -134,21 +147,27 @@ export const products = sqliteTable("products", {
 
 
 // 7. Product Images
-export const productImages = sqliteTable("product_images", {
-  id: text("id").primaryKey(),
-  productId: text("product_id")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  imageUrl: text("image_url").notNull(),
-  altText: text("alt_text"),
-  isPrimary: integer("is_primary", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  sortOrder: integer("sort_order").notNull().default(0),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const productImages = sqliteTable(
+  "product_images",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    imageUrl: text("image_url").notNull(),
+    altText: text("alt_text"),
+    isPrimary: integer("is_primary", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    productIdIdx: index("idx_product_images_product").on(table.productId),
+  })
+);
 
 // 8. Services (PVC, Document Print, Lamination, Photo Print)
 export const services = sqliteTable("services", {
@@ -207,157 +226,179 @@ export const servicePrices = sqliteTable("service_prices", {
 
 
 // 11. Orders
-export const orders = sqliteTable("orders", {
-  id: text("id").primaryKey(),
-  orderReference: text("order_reference").notNull().unique(), // e.g. BS-202610-0001
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => users.id),
-  orderType: text("order_type", {
-    enum: ["shopping", "print_service", "hybrid"],
-  }).notNull(),
-  subtotal: real("subtotal").notNull(),
-  discount: real("discount").notNull().default(0),
-  additionalCharges: real("additional_charges").notNull().default(0),
-  totalAmount: real("total_amount").notNull(),
-  paymentStatus: text("payment_status", {
-    enum: [
-      "unpaid",
-      "awaiting_payment",
-      "payment_initiated",
-      "pending_verification",
-      "paid",
-      "rejected",
-      "failed",
-      "refunded",
-      "review_required",
-      "pending",
-    ],
+export const orders = sqliteTable(
+  "orders",
+  {
+    id: text("id").primaryKey(),
+    orderReference: text("order_reference").notNull().unique(), // e.g. BS-202610-0001
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => users.id),
+    orderType: text("order_type", {
+      enum: ["shopping", "print_service", "hybrid"],
+    }).notNull(),
+    subtotal: real("subtotal").notNull(),
+    discount: real("discount").notNull().default(0),
+    additionalCharges: real("additional_charges").notNull().default(0),
+    totalAmount: real("total_amount").notNull(),
+    paymentStatus: text("payment_status", {
+      enum: [
+        "unpaid",
+        "awaiting_payment",
+        "payment_initiated",
+        "pending_verification",
+        "paid",
+        "rejected",
+        "failed",
+        "refunded",
+        "review_required",
+        "pending",
+      ],
+    })
+      .notNull()
+      .default("unpaid"),
+    paymentMethod: text("payment_method", {
+      enum: ["cash_on_collection", "upi_mock", "online"],
+    })
+      .notNull()
+      .default("cash_on_collection"),
+    orderStatus: text("order_status", {
+      enum: [
+        "pending",
+        "confirmed",
+        "processing",
+        "ready_for_collection",
+        "out_for_delivery",
+        "completed",
+        "cancelled",
+      ],
+    })
+      .notNull()
+      .default("pending"),
+    deliveryType: text("delivery_type", {
+      enum: ["store_pickup", "home_delivery"],
+    })
+      .notNull()
+      .default("store_pickup"),
+    orderNotes: text("order_notes"),
+    internalNotes: text("internal_notes"),
+    shippingAddressJson: text("shipping_address_json"),
+    trackingNumber: text("tracking_number"),
+    courierName: text("courier_name"),
+    dispatchedAt: integer("dispatched_at"),
+    deliveredAt: integer("delivered_at"),
+    deliveryPersonName: text("delivery_person_name"),
+    deliveryPersonPhone: text("delivery_person_phone"),
+    trackingUrl: text("tracking_url"),
+    expectedDeliveryDate: text("expected_delivery_date"),
+    customerFulfillmentNote: text("customer_fulfillment_note"),
+    fulfillmentStatus: text("fulfillment_status", {
+      enum: [
+        "unfulfilled",
+        "preparing",
+        "ready_for_pickup",
+        "in_transit",
+        "out_for_delivery",
+        "delivered",
+        "failed_delivery",
+      ],
+    })
+      .notNull()
+      .default("unfulfilled"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    customerCreatedIdx: index("idx_orders_customer_created").on(table.customerId, table.createdAt),
+    statusIdx: index("idx_orders_status").on(table.orderStatus),
+    refIdx: index("idx_orders_ref").on(table.orderReference),
+    createdAtIdx: index("idx_orders_created_at").on(table.createdAt),
   })
-    .notNull()
-    .default("unpaid"),
-  paymentMethod: text("payment_method", {
-    enum: ["cash_on_collection", "upi_mock", "online"],
-  })
-    .notNull()
-    .default("cash_on_collection"),
-  orderStatus: text("order_status", {
-    enum: [
-      "pending",
-      "confirmed",
-      "processing",
-      "ready_for_collection",
-      "out_for_delivery",
-      "completed",
-      "cancelled",
-    ],
-  })
-    .notNull()
-    .default("pending"),
-  deliveryType: text("delivery_type", {
-    enum: ["store_pickup", "home_delivery"],
-  })
-    .notNull()
-    .default("store_pickup"),
-  orderNotes: text("order_notes"),
-  internalNotes: text("internal_notes"),
-  shippingAddressJson: text("shipping_address_json"),
-  trackingNumber: text("tracking_number"),
-  courierName: text("courier_name"),
-  dispatchedAt: integer("dispatched_at"),
-  deliveredAt: integer("delivered_at"),
-  deliveryPersonName: text("delivery_person_name"),
-  deliveryPersonPhone: text("delivery_person_phone"),
-  trackingUrl: text("tracking_url"),
-  expectedDeliveryDate: text("expected_delivery_date"),
-  customerFulfillmentNote: text("customer_fulfillment_note"),
-  fulfillmentStatus: text("fulfillment_status", {
-    enum: [
-      "unfulfilled",
-      "preparing",
-      "ready_for_pickup",
-      "in_transit",
-      "out_for_delivery",
-      "delivered",
-      "failed_delivery",
-    ],
-  })
-    .notNull()
-    .default("unfulfilled"),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  updatedAt: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
-
-
+);
 
 // 12. Order Items
-export const orderItems = sqliteTable("order_items", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id")
-    .notNull()
-    .references(() => orders.id, { onDelete: "cascade" }),
-  itemType: text("item_type", {
-    enum: [
-      "product",
-      "pvc_card",
-      "document_print",
-      "lamination",
-      "photo_print",
-    ],
-  }).notNull(),
-  productId: text("product_id").references(() => products.id),
-  serviceId: text("service_id").references(() => services.id),
-  configurationJson: text("configuration_json").notNull(),
-  quantity: integer("quantity").notNull().default(1),
-  pageCount: integer("page_count").notNull().default(1),
-  unitPriceSnapshot: real("unit_price_snapshot").notNull(),
-  totalPriceSnapshot: real("total_price_snapshot").notNull(),
-  specialInstructions: text("special_instructions"),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const orderItems = sqliteTable(
+  "order_items",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    itemType: text("item_type", {
+      enum: [
+        "product",
+        "pvc_card",
+        "document_print",
+        "lamination",
+        "photo_print",
+      ],
+    }).notNull(),
+    productId: text("product_id").references(() => products.id),
+    serviceId: text("service_id").references(() => services.id),
+    configurationJson: text("configuration_json").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    pageCount: integer("page_count").notNull().default(1),
+    unitPriceSnapshot: real("unit_price_snapshot").notNull(),
+    totalPriceSnapshot: real("total_price_snapshot").notNull(),
+    specialInstructions: text("special_instructions"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_order_items_order").on(table.orderId),
+    productIdIdx: index("idx_order_items_product").on(table.productId),
+    itemTypeIdx: index("idx_order_items_type").on(table.itemType),
+  })
+);
 
 // 13. Order Files (Uploaded customer documents, PVC IDs, photos, payment screenshots)
-export const orderFiles = sqliteTable("order_files", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id").references(() => orders.id, {
-    onDelete: "set null",
-  }),
-  orderItemId: text("order_item_id").references(() => orderItems.id, {
-    onDelete: "set null",
-  }),
-  uploadedByUserId: text("uploaded_by_user_id")
-    .notNull()
-    .references(() => users.id),
-  originalFilename: text("original_filename").notNull(),
-  storedFilename: text("stored_filename").notNull(),
-  storageKey: text("storage_key").notNull(),
-  fileSize: integer("file_size").notNull(),
-  mimeType: text("mime_type").notNull(),
-  fileCategory: text("file_category", {
-    enum: [
-      "pvc_document",
-      "general_document",
-      "photo",
-      "product_image",
-      "payment_proof",
-      "profile_picture",
-    ],
-  }).notNull(),
-  pageCount: integer("page_count"),
-  retentionExpiresAt: integer("retention_expires_at"),
-  isDeleted: integer("is_deleted", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const orderFiles = sqliteTable(
+  "order_files",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").references(() => orders.id, {
+      onDelete: "set null",
+    }),
+    orderItemId: text("order_item_id").references(() => orderItems.id, {
+      onDelete: "set null",
+    }),
+    uploadedByUserId: text("uploaded_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    originalFilename: text("original_filename").notNull(),
+    storedFilename: text("stored_filename").notNull(),
+    storageKey: text("storage_key").notNull(),
+    fileSize: integer("file_size").notNull(),
+    mimeType: text("mime_type").notNull(),
+    fileCategory: text("file_category", {
+      enum: [
+        "pvc_document",
+        "general_document",
+        "photo",
+        "product_image",
+        "payment_proof",
+        "profile_picture",
+      ],
+    }).notNull(),
+    pageCount: integer("page_count"),
+    retentionExpiresAt: integer("retention_expires_at"),
+    isDeleted: integer("is_deleted", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_order_files_order").on(table.orderId),
+    orderItemIdIdx: index("idx_order_files_item").on(table.orderItemId),
+  })
+);
 
 // 14. Payments
 export const payments = sqliteTable("payments", {
@@ -390,35 +431,42 @@ export const payments = sqliteTable("payments", {
 });
 
 // 15. Audit Logs
-export const auditLogs = sqliteTable("audit_logs", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  action: text("action").notNull(),
-  entityType: text("entity_type", {
-    enum: [
-      "order",
-      "product",
-      "pricing",
-      "user",
-      "file",
-      "auth",
-      "settings",
-      "payment",
-      "account_appeal",
-      "product_review",
-      "upi_account",
-      "developer_profile",
-    ],
-  }).notNull(),
-  entityId: text("entity_id"),
-  detailsJson: text("details_json"),
-  ipAddress: text("ip_address"),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const auditLogs = sqliteTable(
+  "audit_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    entityType: text("entity_type", {
+      enum: [
+        "order",
+        "product",
+        "pricing",
+        "user",
+        "file",
+        "auth",
+        "settings",
+        "payment",
+        "account_appeal",
+        "product_review",
+        "upi_account",
+        "developer_profile",
+      ],
+    }).notNull(),
+    entityId: text("entity_id"),
+    detailsJson: text("details_json"),
+    ipAddress: text("ip_address"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    createdAtIdx: index("idx_audit_logs_created").on(table.createdAt),
+    userIdx: index("idx_audit_logs_user").on(table.userId),
+  })
+);
 
 // 16. Authentication Events
 export const authenticationEvents = sqliteTable("authentication_events", {
@@ -494,87 +542,97 @@ export const shopSettings = sqliteTable("shop_settings", {
 });
 
 // 18. Payment Submissions & Manual UPI Verification Attempts
-export const paymentSubmissions = sqliteTable("payment_submissions", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id")
-    .notNull()
-    .references(() => orders.id, { onDelete: "cascade" }),
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => users.id),
-  amount: real("amount").notNull(),
-  paymentMethod: text("payment_method").notNull().default("upi"),
-  upiIdUsed: text("upi_id_used").notNull(),
-  // Permanent receiving account snapshot (immutable permanent record)
-  receivingAccountId: text("receiving_account_id"),
-  receivingUpiIdSnapshot: text("receiving_upi_id_snapshot"),
-  receivingAccountNameSnapshot: text("receiving_account_name_snapshot"),
-  transactionId: text("transaction_id").notNull(), // UTR / reference number
-  screenshotFileId: text("screenshot_file_id").references(() => orderFiles.id, {
-    onDelete: "set null",
-  }),
-  screenshotUrl: text("screenshot_url"),
-  status: text("status", {
-    enum: [
-      "pending_verification",
-      "verified",
-      "rejected",
-      "expired",
-      "review_required",
-    ],
+export const paymentSubmissions = sqliteTable(
+  "payment_submissions",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => users.id),
+    amount: real("amount").notNull(),
+    paymentMethod: text("payment_method").notNull().default("upi"),
+    upiIdUsed: text("upi_id_used").notNull(),
+    // Permanent receiving account snapshot (immutable permanent record)
+    receivingAccountId: text("receiving_account_id"),
+    receivingUpiIdSnapshot: text("receiving_upi_id_snapshot"),
+    receivingAccountNameSnapshot: text("receiving_account_name_snapshot"),
+    transactionId: text("transaction_id").notNull(), // UTR / reference number
+    screenshotFileId: text("screenshot_file_id").references(() => orderFiles.id, {
+      onDelete: "set null",
+    }),
+    screenshotUrl: text("screenshot_url"),
+    status: text("status", {
+      enum: [
+        "pending_verification",
+        "verified",
+        "rejected",
+        "expired",
+        "review_required",
+      ],
+    })
+      .notNull()
+      .default("pending_verification"),
+    isDuplicateFlagged: integer("is_duplicate_flagged", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    duplicateNotes: text("duplicate_notes"),
+    submissionType: text("submission_type", {
+      enum: ["standard", "post_cancellation_claim"],
+    })
+      .notNull()
+      .default("standard"),
+    idempotencyKey: text("idempotency_key"),
+    rejectionReason: text("rejection_reason"),
+    rejectionNote: text("rejection_note"),
+    verifiedByAdminId: text("verified_by_admin_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    verifiedAt: integer("verified_at"),
+    verificationNote: text("verification_note"),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_payment_submissions_order").on(table.orderId),
   })
-    .notNull()
-    .default("pending_verification"),
-  isDuplicateFlagged: integer("is_duplicate_flagged", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  duplicateNotes: text("duplicate_notes"),
-  submissionType: text("submission_type", {
-    enum: ["standard", "post_cancellation_claim"],
-  })
-    .notNull()
-    .default("standard"),
-  idempotencyKey: text("idempotency_key"),
-  rejectionReason: text("rejection_reason"),
-  rejectionNote: text("rejection_note"),
-  verifiedByAdminId: text("verified_by_admin_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  verifiedAt: integer("verified_at"),
-  verificationNote: text("verification_note"),
-  attemptNumber: integer("attempt_number").notNull().default(1),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  updatedAt: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
-
-
+);
 
 // 19. Order Status History Timeline
-export const orderStatusHistory = sqliteTable("order_status_history", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id")
-    .notNull()
-    .references(() => orders.id, { onDelete: "cascade" }),
-  previousStatus: text("previous_status"),
-  newStatus: text("new_status").notNull(),
-  previousPaymentStatus: text("previous_payment_status"),
-  newPaymentStatus: text("new_payment_status"),
-  changedByUserId: text("changed_by_user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  actorRole: text("actor_role", { enum: ["customer", "admin", "system"] })
-    .notNull()
-    .default("system"),
-  customerMessage: text("customer_message"),
-  internalNote: text("internal_note"),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+export const orderStatusHistory = sqliteTable(
+  "order_status_history",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    previousStatus: text("previous_status"),
+    newStatus: text("new_status").notNull(),
+    previousPaymentStatus: text("previous_payment_status"),
+    newPaymentStatus: text("new_payment_status"),
+    changedByUserId: text("changed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    actorRole: text("actor_role", { enum: ["customer", "admin", "system"] })
+      .notNull()
+      .default("system"),
+    customerMessage: text("customer_message"),
+    internalNote: text("internal_note"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_order_status_history_order").on(table.orderId),
+  })
+);
 
 // 20. Account Appeals & Unblock Requests
 export const accountAppeals = sqliteTable("account_appeals", {
@@ -623,40 +681,47 @@ export const accountAppeals = sqliteTable("account_appeals", {
 
 
 // 21. Product Reviews & Customer Ratings
-export const productReviews = sqliteTable("product_reviews", {
-  id: text("id").primaryKey(), // rev_<uuid>
-  productId: text("product_id")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  orderId: text("order_id").references(() => orders.id, {
-    onDelete: "set null",
-  }),
-  rating: integer("rating").notNull(), // 1 - 5
-  reviewTitle: text("review_title"),
-  reviewText: text("review_text").notNull(),
-  isVerifiedPurchase: integer("is_verified_purchase", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  status: text("status", {
-    enum: ["published", "hidden", "under_review"],
+export const productReviews = sqliteTable(
+  "product_reviews",
+  {
+    id: text("id").primaryKey(), // rev_<uuid>
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => orders.id, {
+      onDelete: "set null",
+    }),
+    rating: integer("rating").notNull(), // 1 - 5
+    reviewTitle: text("review_title"),
+    reviewText: text("review_text").notNull(),
+    isVerifiedPurchase: integer("is_verified_purchase", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    status: text("status", {
+      enum: ["published", "hidden", "under_review"],
+    })
+      .notNull()
+      .default("published"),
+    moderationReason: text("moderation_reason"),
+    moderatedByAdminId: text("moderated_by_admin_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    moderatedAt: integer("moderated_at"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    prodStatusIdx: index("idx_product_reviews_prod_status").on(table.productId, table.status),
+    customerProdIdx: index("idx_product_reviews_customer").on(table.customerId, table.productId),
   })
-    .notNull()
-    .default("published"),
-  moderationReason: text("moderation_reason"),
-  moderatedByAdminId: text("moderated_by_admin_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  moderatedAt: integer("moderated_at"),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  updatedAt: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+);
 
 // 22. Permanent Receiving UPI Accounts History
 export const shopUpiAccounts = sqliteTable("shop_upi_accounts", {
@@ -828,36 +893,43 @@ export const orderReturnItems = sqliteTable("order_return_items", {
 });
 
 // 26. Notifications
-export const notifications = sqliteTable("notifications", {
-  id: text("id").primaryKey(), // notif_<uuid>
-  recipientType: text("recipient_type", { enum: ["admin", "customer"] }).notNull(),
-  recipientId: text("recipient_id").references(() => users.id, { onDelete: "cascade" }),
-  category: text("category", {
-    enum: ["order", "payment", "delivery", "return", "account", "system"],
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(), // notif_<uuid>
+    recipientType: text("recipient_type", { enum: ["admin", "customer"] }).notNull(),
+    recipientId: text("recipient_id").references(() => users.id, { onDelete: "cascade" }),
+    category: text("category", {
+      enum: ["order", "payment", "delivery", "return", "account", "system"],
+    })
+      .notNull()
+      .default("system"),
+    eventType: text("event_type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    entityType: text("entity_type", {
+      enum: ["order", "payment", "return", "user", "setting", "system"],
+    }),
+    entityId: text("entity_id"),
+    linkUrl: text("link_url"),
+    isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+    readAt: integer("read_at"),
+    priority: text("priority", { enum: ["low", "normal", "high", "urgent"] })
+      .notNull()
+      .default("normal"),
+    deduplicationKey: text("deduplication_key"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => ({
+    recipientIdx: index("idx_notifications_recipient").on(table.recipientType, table.recipientId, table.isRead, table.createdAt),
+    dedupIdx: index("idx_notifications_dedup").on(table.deduplicationKey),
   })
-    .notNull()
-    .default("system"),
-  eventType: text("event_type").notNull(),
-  title: text("title").notNull(),
-  message: text("message").notNull(),
-  entityType: text("entity_type", {
-    enum: ["order", "payment", "return", "user", "setting", "system"],
-  }),
-  entityId: text("entity_id"),
-  linkUrl: text("link_url"),
-  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
-  readAt: integer("read_at"),
-  priority: text("priority", { enum: ["low", "normal", "high", "urgent"] })
-    .notNull()
-    .default("normal"),
-  deduplicationKey: text("deduplication_key"),
-  createdAt: integer("created_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  updatedAt: integer("updated_at")
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-});
+);
 
 
 

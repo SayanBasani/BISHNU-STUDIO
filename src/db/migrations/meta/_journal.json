@@ -64,6 +64,20 @@
       "when": 1792950000000,
       "tag": "0008_business_returns_fulfillment",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793000000000,
+      "tag": "0009_notifications_and_session_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793100000000,
+      "tag": "0010_composite_indexes",
+      "breakpoints": true
     }
   ]
 }

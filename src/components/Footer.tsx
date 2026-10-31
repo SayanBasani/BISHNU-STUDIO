@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { fetchPublicShopSettings } from "@/lib/public-settings";
 import {
   Printer,
@@ -29,6 +30,7 @@ interface ShopInfo {
 let cachedFooterShop: ShopInfo | null = null;
 
 export default function Footer() {
+  const pathname = usePathname();
   const [shop, setShop] = useState<ShopInfo>(
     () =>
       cachedFooterShop || {
@@ -70,6 +72,11 @@ export default function Footer() {
       }
     });
   }, []);
+
+  // Do not render customer footer on administrative console routes
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
 
   return (
     <footer className="bg-slate-900 text-gray-300 pt-16 pb-12 border-t border-slate-800">

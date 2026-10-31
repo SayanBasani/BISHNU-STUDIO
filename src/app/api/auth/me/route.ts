@@ -20,12 +20,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const addresses = await timer.measure("database.user_addresses", async () => {
-      return await db
-        .select()
-        .from(userAddresses)
-        .where(eq(userAddresses.userId, auth.user.id));
-    });
+    // Only query addresses if explicitly requested (e.g. checkout or profile address management),
+    // eliminating redundant database roundtrip during regular session hydration
+    const includeAddresses = req.nextUrl.searchParams.get("includeAddresses") === "true";
+    let addresses: any[] = [];
+    if (includeAddresses) {
+      addresses = await timer.measure("database.user_addresses", async () => {
+        return await db
+          .select()
+          .from(userAddresses)
+          .where(eq(userAddresses.userId, auth.user.id));
+      });
+    }
 
     return timer.finish(
       NextResponse.json({

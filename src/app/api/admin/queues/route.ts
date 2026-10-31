@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { orders, orderItems, orderFiles, users } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -50,18 +50,23 @@ export async function GET(req: NextRequest) {
       .where(eq(orderItems.itemType, itemType as any))
       .orderBy(desc(orders.createdAt));
 
-    // Fetch all files associated with these items
-    const allFiles = await db
-      .select({
-        id: orderFiles.id,
-        orderItemId: orderFiles.orderItemId,
-        originalFilename: orderFiles.originalFilename,
-        fileSize: orderFiles.fileSize,
-        mimeType: orderFiles.mimeType,
-        fileCategory: orderFiles.fileCategory,
-        pageCount: orderFiles.pageCount,
-      })
-      .from(orderFiles);
+    // Fetch only files associated with the matched queue items (scoped query using idx_order_files_item)
+    const itemIds = items.map((i) => i.itemId).filter(Boolean);
+    const allFiles =
+      itemIds.length > 0
+        ? await db
+            .select({
+              id: orderFiles.id,
+              orderItemId: orderFiles.orderItemId,
+              originalFilename: orderFiles.originalFilename,
+              fileSize: orderFiles.fileSize,
+              mimeType: orderFiles.mimeType,
+              fileCategory: orderFiles.fileCategory,
+              pageCount: orderFiles.pageCount,
+            })
+            .from(orderFiles)
+            .where(inArray(orderFiles.orderItemId, itemIds))
+        : [];
 
     const enrichedItems = items.map((item) => {
       let config = {};

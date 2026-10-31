@@ -122,6 +122,11 @@ export default function Navbar() {
     };
   }, [mobileMenuOpen]);
 
+  // Do not render customer navbar on administrative console routes
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
+
   const navLinks = [
     { href: "/shop", label: "Shop", icon: ShoppingBag },
     { href: "/services/pvc-card", label: "PVC Cards", icon: CreditCard },

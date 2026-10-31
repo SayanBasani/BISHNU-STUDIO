@@ -28,24 +28,27 @@ export async function GET(
     const offset = (page - 1) * limit;
     const sort = searchParams.get("sort") || "newest"; // "newest" | "highest" | "lowest"
 
-    // Fetch published reviews for this product
-    const allPublished = await db
-      .select({
-        review: productReviews,
-        user: {
-          id: users.id,
-          fullName: users.fullName,
-          avatarUrl: users.avatarUrl,
-        },
-      })
-      .from(productReviews)
-      .innerJoin(users, eq(productReviews.customerId, users.id))
-      .where(
-        and(
-          eq(productReviews.productId, productId),
-          eq(productReviews.status, "published")
-        )
-      );
+    // Parallel fetch: retrieve published reviews and auth session concurrently
+    const [allPublished, auth] = await Promise.all([
+      db
+        .select({
+          review: productReviews,
+          user: {
+            id: users.id,
+            fullName: users.fullName,
+            avatarUrl: users.avatarUrl,
+          },
+        })
+        .from(productReviews)
+        .innerJoin(users, eq(productReviews.customerId, users.id))
+        .where(
+          and(
+            eq(productReviews.productId, productId),
+            eq(productReviews.status, "published")
+          )
+        ),
+      getAuthSession(),
+    ]);
 
     // Calculate rating summary on all published reviews
     const totalReviews = allPublished.length;
@@ -99,45 +102,44 @@ export async function GET(
     let eligibleOrderId: string | null = null;
     let userBlocked = false;
 
-    const auth = await getAuthSession();
     if (auth?.user) {
       if (auth.user.status === "blocked") {
         userBlocked = true;
         eligibilityReason = "Your account is restricted. You cannot submit reviews.";
       } else {
-        // Check for existing review
-        const existing = await db
-          .select()
-          .from(productReviews)
-          .where(
-            and(
-              eq(productReviews.productId, productId),
-              eq(productReviews.customerId, auth.user.id)
+        // Parallel check for existing review and completed purchase
+        const [existing, completedOrders] = await Promise.all([
+          db
+            .select()
+            .from(productReviews)
+            .where(
+              and(
+                eq(productReviews.productId, productId),
+                eq(productReviews.customerId, auth.user.id)
+              )
             )
-          )
-          .limit(1);
+            .limit(1),
+          db
+            .select({
+              orderId: orders.id,
+              orderStatus: orders.orderStatus,
+              deliveryType: orders.deliveryType,
+            })
+            .from(orders)
+            .innerJoin(orderItems, eq(orders.id, orderItems.orderId))
+            .where(
+              and(
+                eq(orders.customerId, auth.user.id),
+                eq(orderItems.productId, productId),
+                eq(orders.orderStatus, "completed")
+              )
+            )
+            .limit(1),
+        ]);
 
         if (existing.length > 0) {
           userReview = existing[0];
         }
-
-        // Check for any completed/collected order containing this product
-        const completedOrders = await db
-          .select({
-            orderId: orders.id,
-            orderStatus: orders.orderStatus,
-            deliveryType: orders.deliveryType,
-          })
-          .from(orders)
-          .innerJoin(orderItems, eq(orders.id, orderItems.orderId))
-          .where(
-            and(
-              eq(orders.customerId, auth.user.id),
-              eq(orderItems.productId, productId),
-              eq(orders.orderStatus, "completed")
-            )
-          )
-          .limit(1);
 
         if (completedOrders.length > 0) {
           isEligible = true;

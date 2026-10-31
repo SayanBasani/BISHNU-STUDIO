@@ -21,7 +21,7 @@ import {
   CANONICAL_PAYMENT_STATUSES,
 } from "@/lib/order-state-machine";
 import { createRequestTimer } from "@/lib/perf";
-import { eq, desc, and, or } from "drizzle-orm";
+import { eq, desc, and, or, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -129,158 +129,172 @@ export async function GET(
       );
     }
 
-    // Fetch order items
-    const items = await timer.measure("database.order_items.fetch", () =>
-      db.select().from(orderItems).where(eq(orderItems.orderId, id))
-    );
+    // Parallel fetch of all order-associated sub-resources
+    const [items, files, custRows, existingReviews, rawTimeline, submissions] =
+      await Promise.all([
+        timer.measure("database.order_items.fetch", () =>
+          db.select().from(orderItems).where(eq(orderItems.orderId, id))
+        ),
+        timer.measure("database.order_files.fetch", () =>
+          db
+            .select({
+              id: orderFiles.id,
+              orderItemId: orderFiles.orderItemId,
+              originalFilename: orderFiles.originalFilename,
+              fileSize: orderFiles.fileSize,
+              mimeType: orderFiles.mimeType,
+              fileCategory: orderFiles.fileCategory,
+              pageCount: orderFiles.pageCount,
+              createdAt: orderFiles.createdAt,
+            })
+            .from(orderFiles)
+            .where(eq(orderFiles.orderId, id))
+        ),
+        timer.measure("database.users.fetch", () =>
+          db
+            .select({
+              id: users.id,
+              fullName: users.fullName,
+              email: users.email,
+              phone: users.phone,
+            })
+            .from(users)
+            .where(eq(users.id, order.customerId))
+            .limit(1)
+        ),
+        timer.measure("database.product_reviews.fetch", () =>
+          db
+            .select()
+            .from(productReviews)
+            .where(eq(productReviews.customerId, auth.user.id))
+        ),
+        timer.measure("database.timeline.fetch", () =>
+          getOrderTimeline(id)
+        ),
+        timer.measure("database.payment_submissions.fetch", () =>
+          db
+            .select()
+            .from(paymentSubmissions)
+            .where(eq(paymentSubmissions.orderId, id))
+            .orderBy(desc(paymentSubmissions.createdAt))
+        ),
+      ]);
 
-    // Fetch associated files
-    const files = await timer.measure("database.order_files.fetch", () =>
-      db
-        .select({
-          id: orderFiles.id,
-          orderItemId: orderFiles.orderItemId,
-          originalFilename: orderFiles.originalFilename,
-          fileSize: orderFiles.fileSize,
-          mimeType: orderFiles.mimeType,
-          fileCategory: orderFiles.fileCategory,
-          pageCount: orderFiles.pageCount,
-          createdAt: orderFiles.createdAt,
-        })
-        .from(orderFiles)
-        .where(eq(orderFiles.orderId, id))
-    );
-
-    // Fetch customer info
-    let customerInfo = null;
-    const custRows = await timer.measure("database.users.fetch", () =>
-      db
-        .select({
-          id: users.id,
-          fullName: users.fullName,
-          email: users.email,
-          phone: users.phone,
-        })
-        .from(users)
-        .where(eq(users.id, order.customerId))
-        .limit(1)
-    );
-
-    if (custRows.length > 0) {
-      customerInfo = custRows[0];
-    }
-
-    // Fetch customer's reviews for items in this order
-    const existingReviews = await timer.measure("database.product_reviews.fetch", () =>
-      db
-        .select()
-        .from(productReviews)
-        .where(eq(productReviews.customerId, auth.user.id))
-    );
-
+    const customerInfo = custRows.length > 0 ? custRows[0] : null;
     const reviewByProductId = new Map(existingReviews.map((r) => [r.productId, r]));
 
-    // Parse JSON configurations, dynamically resolve product catalog details, and attach file download links
-    const parsedItems = await Promise.all(
-      items.map(async (item) => {
-        let configuration: Record<string, any> = {};
-        try {
-          configuration = JSON.parse(item.configurationJson || "{}");
-        } catch {}
+    // Batch fetch catalog products and images in parallel to eliminate N+1 waterfall
+    const productItemIds = items
+      .filter((item) => item.itemType === "product" && item.productId)
+      .map((item) => item.productId as string);
+    const uniqueProductIds = Array.from(new Set(productItemIds));
 
-        let resolvedProductName = configuration.productName || null;
-        let resolvedProductSku = configuration.productSku || null;
-        let resolvedProductImage = configuration.productImageUrl || null;
-        let isResolvedFromCatalog = false;
+    let catalogProductsMap = new Map<string, any>();
+    let productImagesMap = new Map<string, string>();
 
-        let catalogProductExists = false;
-        let currentCatalogStock: number | null = null;
-        let isAvailable = false;
+    if (uniqueProductIds.length > 0) {
+      const [fetchedProducts, fetchedImages] = await Promise.all([
+        timer.measure("database.products.batch", () =>
+          db.select().from(products).where(inArray(products.id, uniqueProductIds))
+        ),
+        timer.measure("database.product_images.batch", () =>
+          db
+            .select({
+              productId: productImages.productId,
+              imageUrl: productImages.imageUrl,
+            })
+            .from(productImages)
+            .where(inArray(productImages.productId, uniqueProductIds))
+        ),
+      ]);
 
-        if (item.itemType === "product") {
-          if (item.productId) {
-            const prodRows = await db
-              .select()
-              .from(products)
-              .where(eq(products.id, item.productId))
-              .limit(1);
+      catalogProductsMap = new Map(fetchedProducts.map((p) => [p.id, p]));
+      for (const img of fetchedImages) {
+        if (!productImagesMap.has(img.productId)) {
+          productImagesMap.set(img.productId, img.imageUrl);
+        }
+      }
+    }
 
-            if (prodRows.length > 0) {
-              catalogProductExists = true;
-              currentCatalogStock = prodRows[0].stockQuantity;
-              isAvailable = prodRows[0].isAvailable;
+    // Parse JSON configurations, dynamically attach resolved product catalog details and file downloads
+    const parsedItems = items.map((item) => {
+      let configuration: Record<string, any> = {};
+      try {
+        configuration = JSON.parse(item.configurationJson || "{}");
+      } catch {}
 
-              if (!resolvedProductName) {
-                resolvedProductName = prodRows[0].name;
-                resolvedProductSku = prodRows[0].sku;
-                isResolvedFromCatalog = true;
-              }
-              if (!resolvedProductSku && prodRows[0].sku) {
-                resolvedProductSku = prodRows[0].sku;
-              }
+      let resolvedProductName = configuration.productName || null;
+      let resolvedProductSku = configuration.productSku || null;
+      let resolvedProductImage = configuration.productImageUrl || null;
+      let isResolvedFromCatalog = false;
 
-              if (!resolvedProductImage) {
-                const imgRows = await db
-                  .select({ imageUrl: productImages.imageUrl })
-                  .from(productImages)
-                  .where(eq(productImages.productId, item.productId))
-                  .limit(1);
-                if (imgRows.length > 0) {
-                  resolvedProductImage = imgRows[0].imageUrl;
-                }
-              }
-            } else {
-              if (!resolvedProductName) {
-                resolvedProductName = "Product details unavailable (historical item)";
+      let catalogProductExists = false;
+      let currentCatalogStock: number | null = null;
+      let isAvailable = false;
+
+      if (item.itemType === "product") {
+        if (item.productId) {
+          const catalogProd = catalogProductsMap.get(item.productId);
+          const prodRows = catalogProd ? [catalogProd] : [];
+          if (prodRows.length > 0) {
+            catalogProductExists = true;
+            currentCatalogStock = prodRows[0].stockQuantity;
+            isAvailable = prodRows[0].isAvailable;
+
+            if (!resolvedProductName) {
+              resolvedProductName = prodRows[0].name;
+              resolvedProductSku = prodRows[0].sku;
+              isResolvedFromCatalog = true;
+            }
+            if (!resolvedProductSku && prodRows[0].sku) {
+              resolvedProductSku = prodRows[0].sku;
+            }
+
+            if (!resolvedProductImage) {
+              const imgUrl = productImagesMap.get(item.productId);
+              if (imgUrl) {
+                resolvedProductImage = imgUrl;
               }
             }
-          } else if (!resolvedProductName) {
-            resolvedProductName = "Product details unavailable (historical item)";
+          } else {
+            if (!resolvedProductName) {
+              resolvedProductName = "Product details unavailable (historical item)";
+            }
           }
+        } else if (!resolvedProductName) {
+          resolvedProductName = "Product details unavailable (historical item)";
         }
+      }
 
-        const stockDeductionStatus =
-          item.itemType !== "product"
-            ? "not_tracked"
-            : configuration.stockDeductionStatus || "deducted_at_checkout";
+      const stockDeductionStatus =
+        item.itemType !== "product"
+          ? "not_tracked"
+          : configuration.stockDeductionStatus || "deducted_at_checkout";
 
-        return {
-          ...item,
-          productName: resolvedProductName,
-          productSku: resolvedProductSku,
-          productImage: resolvedProductImage,
-          isResolvedFromCatalog,
-          catalogProductExists,
-          currentCatalogStock,
-          stockDeductionStatus,
-          configuration,
-          userReview: item.productId ? reviewByProductId.get(item.productId) || null : null,
-          files: files
-            .filter((f) => f.orderItemId === item.id)
-            .map((f) => ({
-              ...f,
-              downloadUrl: `/api/files/download/${f.id}`,
-            })),
-        };
-      })
-    );
+      return {
+        ...item,
+        productName: resolvedProductName,
+        productSku: resolvedProductSku,
+        productImage: resolvedProductImage,
+        isResolvedFromCatalog,
+        catalogProductExists,
+        currentCatalogStock,
+        stockDeductionStatus,
+        configuration,
+        userReview: item.productId ? reviewByProductId.get(item.productId) || null : null,
+        files: files
+          .filter((f) => f.orderItemId === item.id)
+          .map((f) => ({
+            ...f,
+            downloadUrl: `/api/files/download/${f.id}`,
+          })),
+      };
+    });
 
-    // Fetch timeline and payment submissions
-    const rawTimeline = await timer.measure("database.timeline.fetch", () =>
-      getOrderTimeline(id)
-    );
     const timeline = rawTimeline.map((ev) => ({
       ...ev,
       internalNote: isAdmin ? ev.internalNote : undefined,
     }));
-
-    const submissions = await timer.measure("database.payment_submissions.fetch", () =>
-      db
-        .select()
-        .from(paymentSubmissions)
-        .where(eq(paymentSubmissions.orderId, id))
-        .orderBy(desc(paymentSubmissions.createdAt))
-    );
 
     const latestPaymentSubmission = submissions.length > 0 ? submissions[0] : null;
 
@@ -534,7 +548,8 @@ export async function PATCH(
       }
     }
 
-    await timer.measure("database.timeline.record", () =>
+    // Execute timeline logging, audit logging, and customer notification concurrently in parallel
+    const timelinePromise = timer.measure("database.timeline.record", () =>
       recordOrderEvent({
         orderId: id,
         previousStatus: existingOrder.orderStatus,
@@ -551,7 +566,7 @@ export async function PATCH(
       })
     );
 
-    await timer.measure("database.audit.log", () =>
+    const auditPromise = timer.measure("database.audit.log", () =>
       logAuditEvent({
         userId: auth.user.id,
         action: "order_status_updated",
@@ -572,40 +587,43 @@ export async function PATCH(
       })
     );
 
-    // Dispatch customer notification for status change or tracking update
-    if (
-      (orderStatus && orderStatus !== existingOrder.orderStatus) ||
-      (trackingNumber && trackingNumber !== existingOrder.trackingNumber)
-    ) {
-      try {
-        const { createNotification } = await import("@/lib/notifications");
-        const isDelivery =
-          orderStatus === "out_for_delivery" ||
-          Boolean(trackingNumber && trackingNumber !== existingOrder.trackingNumber);
-        const statusLabel = (orderStatus || existingOrder.orderStatus)
-          .replace(/_/g, " ")
-          .toUpperCase();
-        await timer.measure("notifications.dispatch", () =>
-          createNotification({
-            recipientType: "customer",
-            recipientId: existingOrder.customerId,
-            category: isDelivery ? "delivery" : "order",
-            eventType: `order_${orderStatus || "updated"}`,
-            title: `Order #${existingOrder.orderReference}: ${statusLabel}`,
-            message: customerMsg,
-            entityType: "order",
-            entityId: id,
-            linkUrl: `/account/orders/${id}`,
-            priority:
-              orderStatus === "out_for_delivery" || orderStatus === "ready_for_collection"
-                ? "high"
-                : "normal",
-          })
-        );
-      } catch (notifErr) {
-        console.error("Failed to dispatch order status notification:", notifErr);
+    const notificationPromise = (async () => {
+      if (
+        (orderStatus && orderStatus !== existingOrder.orderStatus) ||
+        (trackingNumber && trackingNumber !== existingOrder.trackingNumber)
+      ) {
+        try {
+          const { createNotification } = await import("@/lib/notifications");
+          const isDelivery =
+            orderStatus === "out_for_delivery" ||
+            Boolean(trackingNumber && trackingNumber !== existingOrder.trackingNumber);
+          const statusLabel = (orderStatus || existingOrder.orderStatus)
+            .replace(/_/g, " ")
+            .toUpperCase();
+          await timer.measure("notifications.dispatch", () =>
+            createNotification({
+              recipientType: "customer",
+              recipientId: existingOrder.customerId,
+              category: isDelivery ? "delivery" : "order",
+              eventType: `order_${orderStatus || "updated"}`,
+              title: `Order #${existingOrder.orderReference}: ${statusLabel}`,
+              message: customerMsg,
+              entityType: "order",
+              entityId: id,
+              linkUrl: `/account/orders/${id}`,
+              priority:
+                orderStatus === "out_for_delivery" || orderStatus === "ready_for_collection"
+                  ? "high"
+                  : "normal",
+            })
+          );
+        } catch (notifErr) {
+          console.error("Failed to dispatch order status notification:", notifErr);
+        }
       }
-    }
+    })();
+
+    await Promise.all([timelinePromise, auditPromise, notificationPromise]);
 
     return timer.finish(
       NextResponse.json({

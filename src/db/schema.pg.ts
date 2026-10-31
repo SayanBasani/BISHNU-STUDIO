@@ -6,6 +6,8 @@ import {
   bigint,
   boolean,
   doublePrecision,
+  index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 const nowSql = sql`(EXTRACT(epoch FROM now()) * 1000)::bigint`;
@@ -32,39 +34,52 @@ export const users = pgTable("users", {
 });
 
 // 2. User Addresses (Multiple saved addresses - Flipkart/Amazon style)
-export const userAddresses = pgTable("user_addresses", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  recipientName: text("recipient_name").notNull().default(""),
-  recipientPhone: text("recipient_phone").notNull().default(""),
-  addressType: text("address_type").notNull().default("home"),
-  label: text("label").notNull().default("Home"),
-  houseBuilding: text("house_building").notNull(),
-  streetLocality: text("street_locality").notNull(),
-  landmark: text("landmark"),
-  cityTown: text("city_town").notNull(),
-  state: text("state").notNull(),
-  pinCode: text("pin_code").notNull(),
-  isDefault: boolean("is_default").notNull().default(true),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const userAddresses = pgTable(
+  "user_addresses",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recipientName: text("recipient_name").notNull().default(""),
+    recipientPhone: text("recipient_phone").notNull().default(""),
+    addressType: text("address_type").notNull().default("home"),
+    label: text("label").notNull().default("Home"),
+    houseBuilding: text("house_building").notNull(),
+    streetLocality: text("street_locality").notNull(),
+    landmark: text("landmark"),
+    cityTown: text("city_town").notNull(),
+    state: text("state").notNull(),
+    pinCode: text("pin_code").notNull(),
+    isDefault: boolean("is_default").notNull().default(true),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    userIdx: index("idx_user_addresses_user").on(table.userId),
+  })
+);
 
 // 3. User Sessions
-export const sessions = pgTable("sessions", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  sessionToken: text("session_token").notNull().unique(),
-  credentialVersion: text("credential_version"),
-  userAgent: text("user_agent"),
-  ipAddress: text("ip_address"),
-  lastActiveAt: bigint("last_active_at", { mode: "number" }),
-  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionToken: text("session_token").notNull().unique(),
+    credentialVersion: text("credential_version"),
+    userAgent: text("user_agent"),
+    ipAddress: text("ip_address"),
+    lastActiveAt: bigint("last_active_at", { mode: "number" }),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    tokenIdx: index("idx_sessions_token").on(table.sessionToken),
+    userExpiresIdx: index("idx_sessions_user_expires").on(table.userId, table.expiresAt),
+  })
+);
 
 // 4. Verification Tokens (OTP & Reset Tokens)
 export const verificationTokens = pgTable("verification_tokens", {
@@ -107,17 +122,23 @@ export const products = pgTable("products", {
 });
 
 // 7. Product Images
-export const productImages = pgTable("product_images", {
-  id: text("id").primaryKey(),
-  productId: text("product_id")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  imageUrl: text("image_url").notNull(),
-  altText: text("alt_text"),
-  isPrimary: boolean("is_primary").notNull().default(false),
-  sortOrder: integer("sort_order").notNull().default(0),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const productImages = pgTable(
+  "product_images",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    imageUrl: text("image_url").notNull(),
+    altText: text("alt_text"),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    productIdIdx: index("idx_product_images_product").on(table.productId),
+  })
+);
 
 // 8. Services (PVC, Document Print, Lamination, Photo Print)
 export const services = pgTable("services", {
@@ -162,79 +183,103 @@ export const servicePrices = pgTable("service_prices", {
 });
 
 // 11. Orders
-export const orders = pgTable("orders", {
-  id: text("id").primaryKey(),
-  orderReference: text("order_reference").notNull().unique(),
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => users.id),
-  orderType: text("order_type").notNull(),
-  subtotal: doublePrecision("subtotal").notNull(),
-  discount: doublePrecision("discount").notNull().default(0),
-  additionalCharges: doublePrecision("additional_charges").notNull().default(0),
-  totalAmount: doublePrecision("total_amount").notNull(),
-  paymentStatus: text("payment_status").notNull().default("unpaid"),
-  paymentMethod: text("payment_method").notNull().default("cash_on_collection"),
-  orderStatus: text("order_status").notNull().default("pending"),
-  deliveryType: text("delivery_type").notNull().default("store_pickup"),
-  orderNotes: text("order_notes"),
-  internalNotes: text("internal_notes"),
-  shippingAddressJson: text("shipping_address_json"),
-  trackingNumber: text("tracking_number"),
-  courierName: text("courier_name"),
-  dispatchedAt: bigint("dispatched_at", { mode: "number" }),
-  deliveredAt: bigint("delivered_at", { mode: "number" }),
-  deliveryPersonName: text("delivery_person_name"),
-  deliveryPersonPhone: text("delivery_person_phone"),
-  trackingUrl: text("tracking_url"),
-  expectedDeliveryDate: text("expected_delivery_date"),
-  customerFulfillmentNote: text("customer_fulfillment_note"),
-  fulfillmentStatus: text("fulfillment_status").notNull().default("unfulfilled"),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const orders = pgTable(
+  "orders",
+  {
+    id: text("id").primaryKey(),
+    orderReference: text("order_reference").notNull().unique(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => users.id),
+    orderType: text("order_type").notNull(),
+    subtotal: doublePrecision("subtotal").notNull(),
+    discount: doublePrecision("discount").notNull().default(0),
+    additionalCharges: doublePrecision("additional_charges").notNull().default(0),
+    totalAmount: doublePrecision("total_amount").notNull(),
+    paymentStatus: text("payment_status").notNull().default("unpaid"),
+    paymentMethod: text("payment_method").notNull().default("cash_on_collection"),
+    orderStatus: text("order_status").notNull().default("pending"),
+    deliveryType: text("delivery_type").notNull().default("store_pickup"),
+    orderNotes: text("order_notes"),
+    internalNotes: text("internal_notes"),
+    shippingAddressJson: text("shipping_address_json"),
+    trackingNumber: text("tracking_number"),
+    courierName: text("courier_name"),
+    dispatchedAt: bigint("dispatched_at", { mode: "number" }),
+    deliveredAt: bigint("delivered_at", { mode: "number" }),
+    deliveryPersonName: text("delivery_person_name"),
+    deliveryPersonPhone: text("delivery_person_phone"),
+    trackingUrl: text("tracking_url"),
+    expectedDeliveryDate: text("expected_delivery_date"),
+    customerFulfillmentNote: text("customer_fulfillment_note"),
+    fulfillmentStatus: text("fulfillment_status").notNull().default("unfulfilled"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    customerCreatedIdx: index("idx_orders_customer_created").on(table.customerId, table.createdAt),
+    statusIdx: index("idx_orders_status").on(table.orderStatus),
+    refIdx: index("idx_orders_ref").on(table.orderReference),
+    createdAtIdx: index("idx_orders_created_at").on(table.createdAt),
+  })
+);
 
 // 12. Order Items
-export const orderItems = pgTable("order_items", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id")
-    .notNull()
-    .references(() => orders.id, { onDelete: "cascade" }),
-  itemType: text("item_type").notNull(),
-  productId: text("product_id").references(() => products.id),
-  serviceId: text("service_id").references(() => services.id),
-  configurationJson: text("configuration_json").notNull(),
-  quantity: integer("quantity").notNull().default(1),
-  pageCount: integer("page_count").notNull().default(1),
-  unitPriceSnapshot: doublePrecision("unit_price_snapshot").notNull(),
-  totalPriceSnapshot: doublePrecision("total_price_snapshot").notNull(),
-  specialInstructions: text("special_instructions"),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    itemType: text("item_type").notNull(),
+    productId: text("product_id").references(() => products.id),
+    serviceId: text("service_id").references(() => services.id),
+    configurationJson: text("configuration_json").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    pageCount: integer("page_count").notNull().default(1),
+    unitPriceSnapshot: doublePrecision("unit_price_snapshot").notNull(),
+    totalPriceSnapshot: doublePrecision("total_price_snapshot").notNull(),
+    specialInstructions: text("special_instructions"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_order_items_order").on(table.orderId),
+    productIdIdx: index("idx_order_items_product").on(table.productId),
+    itemTypeIdx: index("idx_order_items_type").on(table.itemType),
+  })
+);
 
 // 13. Order Files (Uploaded customer documents, PVC IDs, photos, payment screenshots)
-export const orderFiles = pgTable("order_files", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id").references(() => orders.id, {
-    onDelete: "set null",
-  }),
-  orderItemId: text("order_item_id").references(() => orderItems.id, {
-    onDelete: "set null",
-  }),
-  uploadedByUserId: text("uploaded_by_user_id")
-    .notNull()
-    .references(() => users.id),
-  originalFilename: text("original_filename").notNull(),
-  storedFilename: text("stored_filename").notNull(),
-  storageKey: text("storage_key").notNull(),
-  fileSize: integer("file_size").notNull(),
-  mimeType: text("mime_type").notNull(),
-  fileCategory: text("file_category").notNull(),
-  pageCount: integer("page_count"),
-  retentionExpiresAt: bigint("retention_expires_at", { mode: "number" }),
-  isDeleted: boolean("is_deleted").notNull().default(false),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const orderFiles = pgTable(
+  "order_files",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").references(() => orders.id, {
+      onDelete: "set null",
+    }),
+    orderItemId: text("order_item_id").references(() => orderItems.id, {
+      onDelete: "set null",
+    }),
+    uploadedByUserId: text("uploaded_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    originalFilename: text("original_filename").notNull(),
+    storedFilename: text("stored_filename").notNull(),
+    storageKey: text("storage_key").notNull(),
+    fileSize: integer("file_size").notNull(),
+    mimeType: text("mime_type").notNull(),
+    fileCategory: text("file_category").notNull(),
+    pageCount: integer("page_count"),
+    retentionExpiresAt: bigint("retention_expires_at", { mode: "number" }),
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_order_files_order").on(table.orderId),
+    orderItemIdIdx: index("idx_order_files_item").on(table.orderItemId),
+  })
+);
 
 // 14. Payments
 export const payments = pgTable("payments", {
@@ -260,18 +305,25 @@ export const payments = pgTable("payments", {
 });
 
 // 15. Audit Logs
-export const auditLogs = pgTable("audit_logs", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  action: text("action").notNull(),
-  entityType: text("entity_type").notNull(),
-  entityId: text("entity_id"),
-  detailsJson: text("details_json"),
-  ipAddress: text("ip_address"),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id"),
+    detailsJson: text("details_json"),
+    ipAddress: text("ip_address"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    createdAtIdx: index("idx_audit_logs_created").on(table.createdAt),
+    userIdx: index("idx_audit_logs_user").on(table.userId),
+  })
+);
 
 // 16. Authentication Events
 export const authenticationEvents = pgTable("authentication_events", {
@@ -328,60 +380,72 @@ export const shopSettings = pgTable("shop_settings", {
 });
 
 // 18. Payment Submissions & Manual UPI Verification Attempts
-export const paymentSubmissions = pgTable("payment_submissions", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id")
-    .notNull()
-    .references(() => orders.id, { onDelete: "cascade" }),
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => users.id),
-  amount: doublePrecision("amount").notNull(),
-  paymentMethod: text("payment_method").notNull().default("upi"),
-  upiIdUsed: text("upi_id_used").notNull(),
-  receivingAccountId: text("receiving_account_id"),
-  receivingUpiIdSnapshot: text("receiving_upi_id_snapshot"),
-  receivingAccountNameSnapshot: text("receiving_account_name_snapshot"),
-  transactionId: text("transaction_id").notNull(),
-  screenshotFileId: text("screenshot_file_id").references(() => orderFiles.id, {
-    onDelete: "set null",
-  }),
-  screenshotUrl: text("screenshot_url"),
-  status: text("status").notNull().default("pending_verification"),
-  isDuplicateFlagged: boolean("is_duplicate_flagged").notNull().default(false),
-  duplicateNotes: text("duplicate_notes"),
-  submissionType: text("submission_type").notNull().default("standard"),
-  idempotencyKey: text("idempotency_key"),
-  rejectionReason: text("rejection_reason"),
-  rejectionNote: text("rejection_note"),
-  verifiedByAdminId: text("verified_by_admin_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  verifiedAt: bigint("verified_at", { mode: "number" }),
-  verificationNote: text("verification_note"),
-  attemptNumber: integer("attempt_number").notNull().default(1),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const paymentSubmissions = pgTable(
+  "payment_submissions",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => users.id),
+    amount: doublePrecision("amount").notNull(),
+    paymentMethod: text("payment_method").notNull().default("upi"),
+    upiIdUsed: text("upi_id_used").notNull(),
+    receivingAccountId: text("receiving_account_id"),
+    receivingUpiIdSnapshot: text("receiving_upi_id_snapshot"),
+    receivingAccountNameSnapshot: text("receiving_account_name_snapshot"),
+    transactionId: text("transaction_id").notNull(),
+    screenshotFileId: text("screenshot_file_id").references(() => orderFiles.id, {
+      onDelete: "set null",
+    }),
+    screenshotUrl: text("screenshot_url"),
+    status: text("status").notNull().default("pending_verification"),
+    isDuplicateFlagged: boolean("is_duplicate_flagged").notNull().default(false),
+    duplicateNotes: text("duplicate_notes"),
+    submissionType: text("submission_type").notNull().default("standard"),
+    idempotencyKey: text("idempotency_key"),
+    rejectionReason: text("rejection_reason"),
+    rejectionNote: text("rejection_note"),
+    verifiedByAdminId: text("verified_by_admin_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    verifiedAt: bigint("verified_at", { mode: "number" }),
+    verificationNote: text("verification_note"),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_payment_submissions_order").on(table.orderId),
+  })
+);
 
 // 19. Order Status History Timeline
-export const orderStatusHistory = pgTable("order_status_history", {
-  id: text("id").primaryKey(),
-  orderId: text("order_id")
-    .notNull()
-    .references(() => orders.id, { onDelete: "cascade" }),
-  previousStatus: text("previous_status"),
-  newStatus: text("new_status").notNull(),
-  previousPaymentStatus: text("previous_payment_status"),
-  newPaymentStatus: text("new_payment_status"),
-  changedByUserId: text("changed_by_user_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  actorRole: text("actor_role").notNull().default("system"),
-  customerMessage: text("customer_message"),
-  internalNote: text("internal_note"),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const orderStatusHistory = pgTable(
+  "order_status_history",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    previousStatus: text("previous_status"),
+    newStatus: text("new_status").notNull(),
+    previousPaymentStatus: text("previous_payment_status"),
+    newPaymentStatus: text("new_payment_status"),
+    changedByUserId: text("changed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    actorRole: text("actor_role").notNull().default("system"),
+    customerMessage: text("customer_message"),
+    internalNote: text("internal_note"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    orderIdIdx: index("idx_order_status_history_order").on(table.orderId),
+  })
+);
 
 // 20. Account Appeals & Unblock Requests
 export const accountAppeals = pgTable("account_appeals", {
@@ -406,30 +470,37 @@ export const accountAppeals = pgTable("account_appeals", {
 });
 
 // 21. Product Reviews & Customer Ratings
-export const productReviews = pgTable("product_reviews", {
-  id: text("id").primaryKey(),
-  productId: text("product_id")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  orderId: text("order_id").references(() => orders.id, {
-    onDelete: "set null",
-  }),
-  rating: integer("rating").notNull(),
-  reviewTitle: text("review_title"),
-  reviewText: text("review_text").notNull(),
-  isVerifiedPurchase: boolean("is_verified_purchase").notNull().default(false),
-  status: text("status").notNull().default("published"),
-  moderationReason: text("moderation_reason"),
-  moderatedByAdminId: text("moderated_by_admin_id").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  moderatedAt: bigint("moderated_at", { mode: "number" }),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const productReviews = pgTable(
+  "product_reviews",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => orders.id, {
+      onDelete: "set null",
+    }),
+    rating: integer("rating").notNull(),
+    reviewTitle: text("review_title"),
+    reviewText: text("review_text").notNull(),
+    isVerifiedPurchase: boolean("is_verified_purchase").notNull().default(false),
+    status: text("status").notNull().default("published"),
+    moderationReason: text("moderation_reason"),
+    moderatedByAdminId: text("moderated_by_admin_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    moderatedAt: bigint("moderated_at", { mode: "number" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    prodStatusIdx: index("idx_product_reviews_prod_status").on(table.productId, table.status),
+    customerProdIdx: index("idx_product_reviews_customer").on(table.customerId, table.productId),
+  })
+);
 
 // 22. Permanent Receiving UPI Accounts History
 export const shopUpiAccounts = pgTable("shop_upi_accounts", {
@@ -546,22 +617,29 @@ export const orderReturnItems = pgTable("order_return_items", {
 });
 
 // 26. Notifications
-export const notifications = pgTable("notifications", {
-  id: text("id").primaryKey(), // notif_<uuid>
-  recipientType: text("recipient_type").notNull(), // 'admin' | 'customer'
-  recipientId: text("recipient_id").references(() => users.id, { onDelete: "cascade" }),
-  category: text("category").notNull().default("system"), // order, payment, delivery, return, account, system
-  eventType: text("event_type").notNull(),
-  title: text("title").notNull(),
-  message: text("message").notNull(),
-  entityType: text("entity_type"), // order, payment, return, user, system
-  entityId: text("entity_id"),
-  linkUrl: text("link_url"),
-  isRead: boolean("is_read").notNull().default(false),
-  readAt: bigint("read_at", { mode: "number" }),
-  priority: text("priority").notNull().default("normal"), // low, normal, high, urgent
-  deduplicationKey: text("deduplication_key"),
-  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
-  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
-});
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(), // notif_<uuid>
+    recipientType: text("recipient_type").notNull(), // 'admin' | 'customer'
+    recipientId: text("recipient_id").references(() => users.id, { onDelete: "cascade" }),
+    category: text("category").notNull().default("system"), // order, payment, delivery, return, account, system
+    eventType: text("event_type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    entityType: text("entity_type"), // order, payment, return, user, system
+    entityId: text("entity_id"),
+    linkUrl: text("link_url"),
+    isRead: boolean("is_read").notNull().default(false),
+    readAt: bigint("read_at", { mode: "number" }),
+    priority: text("priority").notNull().default("normal"), // low, normal, high, urgent
+    deduplicationKey: text("deduplication_key"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
+  },
+  (table) => ({
+    recipientIdx: index("idx_notifications_recipient").on(table.recipientType, table.recipientId, table.isRead, table.createdAt),
+    dedupIdx: index("idx_notifications_dedup").on(table.deduplicationKey),
+  })
+);
 

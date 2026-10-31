@@ -45,7 +45,7 @@ export async function createNotification(input: CreateNotificationInput) {
 
   const id = `notif_${crypto.randomUUID()}`;
 
-  await db.insert(notifications).values({
+  const newNotif = {
     id,
     recipientType: input.recipientType,
     recipientId: input.recipientId || null,
@@ -62,15 +62,11 @@ export async function createNotification(input: CreateNotificationInput) {
     deduplicationKey: input.deduplicationKey || null,
     createdAt: now,
     updatedAt: now,
-  });
+  };
 
-  const inserted = await db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.id, id))
-    .limit(1);
+  await db.insert(notifications).values(newNotif);
 
-  return inserted[0];
+  return newNotif;
 }
 
 export async function getNotifications(options: {
@@ -217,6 +213,11 @@ export async function markNotificationAsRead(
     if (notif.recipientType !== "admin") {
       return { success: false, error: "Unauthorized access to notification" };
     }
+  }
+
+  // Idempotency: if already read, avoid redundant database update
+  if (notif.isRead) {
+    return { success: true, notificationId, alreadyRead: true };
   }
 
   const now = Date.now();

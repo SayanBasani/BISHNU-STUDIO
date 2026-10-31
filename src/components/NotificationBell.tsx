@@ -56,12 +56,45 @@ const lastFetchTimestamp: Record<string, number> = {
   customer: 0,
   admin: 0,
 };
+const sharedPollerIntervals: Record<string, NodeJS.Timeout | null> = {
+  customer: null,
+  admin: null,
+};
+const sharedSubscribers: Record<string, number> = {
+  customer: 0,
+  admin: 0,
+};
+const authUnauthorized: Record<string, boolean> = {
+  customer: false,
+  admin: false,
+};
+const inFlightReadIds = new Set<string>();
+
+export function startSharedPolling(scope: "customer" | "admin") {
+  if (typeof window === "undefined") return;
+  if (sharedPollerIntervals[scope]) return;
+  if (authUnauthorized[scope]) return;
+
+  sharedPollerIntervals[scope] = setInterval(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "visible" && !authUnauthorized[scope]) {
+      executeSharedFetch(scope);
+    }
+  }, 30000);
+}
+
+export function stopSharedPolling(scope: "customer" | "admin") {
+  if (sharedPollerIntervals[scope]) {
+    clearInterval(sharedPollerIntervals[scope]!);
+    sharedPollerIntervals[scope] = null;
+  }
+}
 
 export function clearNotificationCache(scope?: "customer" | "admin") {
   if (scope) {
     lastFetchedData[scope] = null;
     lastFetchTimestamp[scope] = 0;
     sharedInFlight[scope] = null;
+    authUnauthorized[scope] = false;
   } else {
     lastFetchedData.customer = null;
     lastFetchedData.admin = null;
@@ -69,10 +102,15 @@ export function clearNotificationCache(scope?: "customer" | "admin") {
     lastFetchTimestamp.admin = 0;
     sharedInFlight.customer = null;
     sharedInFlight.admin = null;
+    authUnauthorized.customer = false;
+    authUnauthorized.admin = false;
   }
 }
 
 async function executeSharedFetch(scope: "customer" | "admin"): Promise<{ items: NotificationItem[]; unreadCount: number } | null> {
+  if (authUnauthorized[scope]) {
+    return null;
+  }
   const now = Date.now();
   // Return cached result if fetched within 2 seconds
   if (lastFetchedData[scope] && now - lastFetchTimestamp[scope] < 2000) {
@@ -88,7 +126,13 @@ async function executeSharedFetch(scope: "customer" | "admin"): Promise<{ items:
       const res = await fetch(`/api/notifications?scope=${scope}&limit=10`, {
         cache: "no-store",
       });
+      if (res.status === 401) {
+        authUnauthorized[scope] = true;
+        stopSharedPolling(scope);
+        return null;
+      }
       if (!res.ok) return null;
+      authUnauthorized[scope] = false;
       const data = await res.json();
       if (data.success) {
         const payload = {
@@ -322,59 +366,68 @@ export default function NotificationBell({
     }
   }, [user?.id, scope]);
 
+  // Check authorization for current scope
+  const isAuthorized = React.useMemo(() => {
+    if (authLoading) return false;
+    if (scope === "customer") {
+      return !!user;
+    }
+    if (scope === "admin") {
+      return !!user && user.role === "admin";
+    }
+    return false;
+  }, [scope, authLoading, user]);
+
   // Fetch notifications via shared deduplicated poller
   const fetchNotifications = useCallback(async () => {
     // Strictly skip customer polling while auth is loading or user is not logged in
     if (scope === "customer" && (authLoading || !user)) {
       return;
     }
+    if (!isAuthorized) {
+      return;
+    }
     await executeSharedFetch(scope);
-  }, [scope, authLoading, user]);
+  }, [scope, isAuthorized, authLoading, user]);
 
-  // Visibility-aware background polling
+  // Visibility-aware centralized background polling
   useEffect(() => {
-    // Strictly skip customer polling while auth is loading or user is not logged in
-    if (scope === "customer" && (authLoading || !user)) {
+    if (!isAuthorized) {
       return;
     }
 
-    fetchNotifications();
+    // Reset unauthorized flag now that credentials or authorization changed
+    authUnauthorized[scope] = false;
 
-    let intervalId: NodeJS.Timeout | null = null;
+    sharedSubscribers[scope] = (sharedSubscribers[scope] || 0) + 1;
 
-    const startPolling = () => {
-      if (!intervalId) {
-        intervalId = setInterval(fetchNotifications, 30000);
-      }
-    };
+    // Fetch immediately on mount / authorization
+    executeSharedFetch(scope);
 
-    const stopPolling = () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    };
+    // Ensure centralized shared poller is active
+    if (typeof document !== "undefined" && document.visibilityState === "visible") {
+      startSharedPolling(scope);
+    }
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        fetchNotifications();
-        startPolling();
+        executeSharedFetch(scope);
+        startSharedPolling(scope);
       } else {
-        stopPolling();
+        stopSharedPolling(scope);
       }
     };
-
-    if (document.visibilityState === "visible") {
-      startPolling();
-    }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      stopPolling();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      sharedSubscribers[scope] = Math.max(0, (sharedSubscribers[scope] || 1) - 1);
+      if (sharedSubscribers[scope] === 0) {
+        stopSharedPolling(scope);
+      }
     };
-  }, [fetchNotifications, scope, authLoading, user]);
+  }, [scope, isAuthorized]);
 
   // Click outside to close
   useEffect(() => {
@@ -400,20 +453,25 @@ export default function NotificationBell({
     };
   }, [isOpen]);
 
-  // Mark single as read
+  // Mark single as read with deduplication guard and optimistic update
   const handleMarkAsRead = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (inFlightReadIds.has(id)) return;
+    inFlightReadIds.add(id);
+
+    // Optimistic UI update
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+    );
+    setUnreadCount((prev) => Math.max(prev - 1, 0));
+
     try {
-      const res = await fetch(`/api/notifications/${id}/read`, {
+      await fetch(`/api/notifications/${id}/read`, {
         method: "PATCH",
       });
-      if (res.ok) {
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-        );
-        setUnreadCount((prev) => Math.max(prev - 1, 0));
-      }
-    } catch {}
+    } catch {} finally {
+      inFlightReadIds.delete(id);
+    }
   };
 
   // Mark all as read
