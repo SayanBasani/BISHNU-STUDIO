@@ -1,3 +1,4 @@
+[__](https://chatgpt.com/share/6ae5f97b-a920-83ee-96b2-d7c8ad39786f) [_](https://chatgpt.com/c/6adc1065-8a34-83e8-91ea-2f5440f96a0b)
 # Bishnu Studio — Shopping, Printing & Document Services Platform
 
 > Production-grade, full-stack e-commerce, custom document printing, PVC card creation, photo studio, and manual UPI payment reconciliation platform for **Bishnu Studio** (West Bengal, India). Built with Next.js 14 App Router, TypeScript, Tailwind CSS with Dark/Light Mode, Drizzle ORM, dual database support (Neon Serverless PostgreSQL & local SQLite fallback), and secure file storage.

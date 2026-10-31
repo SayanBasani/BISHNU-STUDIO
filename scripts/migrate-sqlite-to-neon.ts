@@ -76,6 +76,9 @@ const TABLE_DEPENDENCY_ORDER: {
   { name: "product_reviews", sqTable: sqSchema.productReviews, pgTable: pgSchema.productReviews, booleanFields: ["isVerifiedPurchase"] },
   { name: "audit_logs", sqTable: sqSchema.auditLogs, pgTable: pgSchema.auditLogs },
   { name: "authentication_events", sqTable: sqSchema.authenticationEvents, pgTable: pgSchema.authenticationEvents },
+  { name: "notifications", sqTable: sqSchema.notifications, pgTable: pgSchema.notifications, booleanFields: ["isRead"] },
+  { name: "db_sync_outbox", sqTable: sqSchema.dbSyncOutbox, pgTable: pgSchema.dbSyncOutbox },
+  { name: "db_sync_history", sqTable: sqSchema.dbSyncHistory, pgTable: pgSchema.dbSyncHistory },
 ];
 
 async function main() {

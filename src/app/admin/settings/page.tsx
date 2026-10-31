@@ -217,6 +217,26 @@ export default function AdminSettingsPage() {
         </Link>
 
         <Link
+          href="/admin/settings/database"
+          className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-purple-500 dark:hover:border-purple-500 shadow-sm transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-300 flex items-center justify-center">
+              <Database className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-purple-600 dark:text-purple-400 group-hover:underline">
+              Configure &rarr;
+            </span>
+          </div>
+          <h3 className="font-bold text-sm text-slate-900 dark:text-white mt-3">
+            Database &amp; Storage Architecture
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Dual Neon PostgreSQL primary &amp; LibSQL fallback, fencing tokens, outbox sync &amp; failover.
+          </p>
+        </Link>
+
+        <Link
           href="/admin/settings/security"
           className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-purple-500 dark:hover:border-purple-500 shadow-sm transition group"
         >
@@ -445,8 +465,8 @@ export default function AdminSettingsPage() {
             <div className="space-y-2.5 text-xs">
               <div className="flex justify-between items-center py-1 border-b border-slate-100 dark:border-slate-800/60">
                 <span className="text-slate-500 dark:text-slate-400">Database Driver:</span>
-                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                  LibSQL / Local SQLite (Turso Ready)
+                <span className="font-mono font-bold text-purple-600 dark:text-purple-400">
+                  Neon PostgreSQL + LibSQL (Dual Architecture)
                 </span>
               </div>
 

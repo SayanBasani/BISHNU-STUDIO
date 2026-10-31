@@ -981,5 +981,61 @@ export const notifications = sqliteTable(
   })
 );
 
+// 27. DB Synchronization Outbox (Emergency Fallback -> Primary Neon)
+export const dbSyncOutbox = sqliteTable(
+  "db_sync_outbox",
+  {
+    id: text("id").primaryKey(), // sync_<uuid/nanoid>
+    entityType: text("entity_type").notNull(), // 'orders', 'payments', 'users', 'returns', etc.
+    entityId: text("entity_id").notNull(),
+    operation: text("operation", { enum: ["INSERT", "UPDATE", "DELETE"] }).notNull(),
+    payloadJson: text("payload_json").notNull(),
+    fencingToken: integer("fencing_token").notNull().default(1),
+    status: text("status", { enum: ["pending", "synced", "conflict", "failed"] })
+      .notNull()
+      .default("pending"),
+    retryCount: integer("retry_count").notNull().default(0),
+    errorMessage: text("error_message"),
+    conflictDetails: text("conflict_details"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    syncedAt: integer("synced_at"),
+  },
+  (table) => ({
+    statusIdx: index("idx_sync_outbox_status").on(table.status, table.createdAt),
+    entityIdx: index("idx_sync_outbox_entity").on(table.entityType, table.entityId),
+    fencingIdx: index("idx_sync_outbox_fencing").on(table.fencingToken),
+  })
+);
+
+// 28. DB Synchronization History (Audit log of synchronization runs)
+export const dbSyncHistory = sqliteTable(
+  "db_sync_history",
+  {
+    id: text("id").primaryKey(), // synchist_<uuid>
+    fencingToken: integer("fencing_token").notNull(),
+    sourceProvider: text("source_provider").notNull(), // 'local_sqlite' | 'remote_libsql'
+    targetProvider: text("target_provider").notNull(), // 'neon_postgres'
+    eventsCount: integer("events_count").notNull().default(0),
+    syncedCount: integer("synced_count").notNull().default(0),
+    conflictsCount: integer("conflicts_count").notNull().default(0),
+    failuresCount: integer("failures_count").notNull().default(0),
+    status: text("status", { enum: ["in_progress", "completed", "failed", "partial"] })
+      .notNull()
+      .default("in_progress"),
+    detailsJson: text("details_json"),
+    executedByUserId: text("executed_by_user_id"),
+    startedAt: integer("started_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    completedAt: integer("completed_at"),
+  },
+  (table) => ({
+    startedIdx: index("idx_sync_history_started").on(table.startedAt),
+  })
+);
+
+
 
 
