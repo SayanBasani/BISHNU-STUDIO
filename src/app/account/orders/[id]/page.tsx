@@ -732,7 +732,7 @@ export default function OrderTrackingDetailPage() {
                               ? `Document Lamination (${item.configuration?.laminationSize})`
                               : item.itemType === "photo_print"
                               ? `Photo Studio Print (${item.configuration?.photoSize})`
-                              : "Shop Product"}
+                              : (item.productName || item.configuration?.productName || "Product details unavailable (historical item)")}
                           </p>
                         </div>
 
@@ -1303,7 +1303,7 @@ export default function OrderTrackingDetailPage() {
                         <div>
                           <p className="font-bold text-slate-900 dark:text-white truncate">
                             {item.itemType === "product"
-                              ? "Shop Product"
+                              ? (item.productName || item.configuration?.productName || "Product details unavailable (historical item)")
                               : item.itemType.replace(/_/g, " ").toUpperCase()}
                           </p>
                           <span className="text-[11px] text-slate-500">

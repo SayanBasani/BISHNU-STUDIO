@@ -167,6 +167,7 @@ export async function POST(req: NextRequest) {
       let totalPrice = 0;
       let pageCount = 1;
       let resolvedServiceId = item.serviceId;
+      let snapshottedProduct: { name: string; sku?: string | null; imageUrl?: string | null } | null = null;
 
       if (item.itemType === "product") {
         if (!item.productId) {
@@ -181,6 +182,11 @@ export async function POST(req: NextRequest) {
         );
         unitPrice = calc.unitPrice;
         totalPrice = calc.totalPrice;
+        snapshottedProduct = {
+          name: calc.product.name,
+          sku: calc.product.sku,
+          imageUrl: calc.product.imageUrl,
+        };
 
         // Decrement product inventory
         await db
@@ -241,12 +247,23 @@ export async function POST(req: NextRequest) {
 
       calculatedSubtotal += totalPrice;
 
+      const finalConfig = {
+        ...item.configuration,
+        ...(snapshottedProduct
+          ? {
+              productName: snapshottedProduct.name,
+              productSku: snapshottedProduct.sku || undefined,
+              productImageUrl: snapshottedProduct.imageUrl || undefined,
+            }
+          : {}),
+      };
+
       verifiedItems.push({
         id: itemId,
         itemType: item.itemType,
         productId: item.productId,
         serviceId: resolvedServiceId,
-        configurationJson: JSON.stringify(item.configuration),
+        configurationJson: JSON.stringify(finalConfig),
         quantity: item.quantity,
         pageCount,
         unitPriceSnapshot: unitPrice,

@@ -271,19 +271,19 @@ export default function AdminOrdersPage() {
           {/* Desktop Table View */}
           <div className="hidden lg:block bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">
+              <table className="w-full min-w-[1200px] text-left text-xs border-collapse">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="py-3 px-4">Order Ref</th>
-                    <th className="py-3 px-4">Date & Time</th>
-                    <th className="py-3 px-4">Customer</th>
-                    <th className="py-3 px-4">Fulfillment</th>
-                    <th className="py-3 px-4 text-center">Items</th>
-                    <th className="py-3 px-4 font-mono">Total</th>
-                    <th className="py-3 px-4">Payment Method</th>
-                    <th className="py-3 px-4">Payment Status</th>
-                    <th className="py-3 px-4">Order Status</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-3.5 px-4 min-w-[170px] whitespace-nowrap">Order Ref</th>
+                    <th className="py-3.5 px-4 min-w-[140px] whitespace-nowrap">Date & Time</th>
+                    <th className="py-3.5 px-4 min-w-[170px]">Customer</th>
+                    <th className="py-3.5 px-4 min-w-[150px]">Fulfillment</th>
+                    <th className="py-3.5 px-4 min-w-[80px] text-center">Items</th>
+                    <th className="py-3.5 px-4 min-w-[110px] font-mono whitespace-nowrap">Total</th>
+                    <th className="py-3.5 px-4 min-w-[150px] whitespace-nowrap">Payment Method</th>
+                    <th className="py-3.5 px-4 min-w-[140px] whitespace-nowrap">Payment Status</th>
+                    <th className="py-3.5 px-4 min-w-[140px] whitespace-nowrap">Order Status</th>
+                    <th className="py-3.5 px-4 min-w-[130px] text-right sticky right-0 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-xs shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.08)] dark:shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.5)] z-20">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
@@ -297,7 +297,7 @@ export default function AdminOrdersPage() {
                         className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition group"
                       >
                         {/* Order Ref */}
-                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             <span>{ord.orderReference}</span>
                             <button
@@ -321,11 +321,11 @@ export default function AdminOrdersPage() {
 
                         {/* Customer */}
                         <td className="py-3.5 px-4">
-                          <div className="font-semibold text-slate-900 dark:text-white">
+                          <div className="font-semibold text-slate-900 dark:text-white truncate max-w-[160px]">
                             {ord.customer?.fullName || "Guest Customer"}
                           </div>
                           {ord.customer?.phone && (
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1 mt-0.5 whitespace-nowrap">
                               <Phone className="w-3 h-3 text-slate-400" />
                               +91 {ord.customer.phone}
                             </div>
@@ -334,7 +334,7 @@ export default function AdminOrdersPage() {
 
                         {/* Fulfillment & Delivery Area / PIN */}
                         <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-1.5 font-medium">
+                          <div className="flex items-center gap-1.5 font-medium whitespace-nowrap">
                             {isPickup ? (
                               <span className="inline-flex items-center gap-1 text-blue-700 dark:text-blue-400 font-semibold">
                                 <ShoppingBag className="w-3.5 h-3.5" /> Store Pickup
@@ -346,7 +346,7 @@ export default function AdminOrdersPage() {
                             )}
                           </div>
                           {!isPickup && (
-                            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 whitespace-nowrap">
                               {isAddressMissing ? (
                                 <span className="inline-flex items-center gap-0.5 text-rose-600 dark:text-rose-400 font-bold">
                                   <AlertTriangle className="w-3 h-3" /> Address Missing!
@@ -364,7 +364,7 @@ export default function AdminOrdersPage() {
                         </td>
 
                         {/* Item Count */}
-                        <td className="py-3.5 px-4 text-center font-bold text-slate-900 dark:text-white">
+                        <td className="py-3.5 px-4 text-center font-bold text-slate-900 dark:text-white whitespace-nowrap">
                           <span className="inline-block px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px]">
                             {ord.itemCount || 1}
                           </span>
@@ -409,8 +409,8 @@ export default function AdminOrdersPage() {
                           </span>
                         </td>
 
-                        {/* Actions */}
-                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        {/* Actions (Sticky Right Column) */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap sticky right-0 bg-white/95 dark:bg-slate-900/95 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/80 backdrop-blur-xs shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.08)] dark:shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.5)] z-10 transition-colors">
                           <Link
                             href={`/admin/orders/${ord.id}`}
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-sm hover:shadow"

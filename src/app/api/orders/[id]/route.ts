@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import {
@@ -8,6 +9,9 @@ import {
   users,
   paymentSubmissions,
   productReviews,
+  products,
+  productImages,
+  payments,
 } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
 import { getOrderTimeline, recordOrderEvent } from "@/lib/order-timeline";
@@ -17,7 +21,7 @@ import {
   CANONICAL_PAYMENT_STATUSES,
 } from "@/lib/order-state-machine";
 import { createRequestTimer } from "@/lib/perf";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, or } from "drizzle-orm";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -176,18 +180,65 @@ export async function GET(
 
     const reviewByProductId = new Map(existingReviews.map((r) => [r.productId, r]));
 
-    // Parse JSON configurations and attach file download links
-    const parsedItems = items.map((item) => ({
-      ...item,
-      configuration: JSON.parse(item.configurationJson || "{}"),
-      userReview: item.productId ? reviewByProductId.get(item.productId) || null : null,
-      files: files
-        .filter((f) => f.orderItemId === item.id)
-        .map((f) => ({
-          ...f,
-          downloadUrl: `/api/files/download/${f.id}`,
-        })),
-    }));
+    // Parse JSON configurations, dynamically resolve product catalog details, and attach file download links
+    const parsedItems = await Promise.all(
+      items.map(async (item) => {
+        let configuration: Record<string, any> = {};
+        try {
+          configuration = JSON.parse(item.configurationJson || "{}");
+        } catch {}
+
+        let resolvedProductName = configuration.productName || null;
+        let resolvedProductSku = configuration.productSku || null;
+        let resolvedProductImage = configuration.productImageUrl || null;
+        let isResolvedFromCatalog = false;
+
+        if (item.itemType === "product") {
+          if (!resolvedProductName && item.productId) {
+            const prodRows = await db
+              .select()
+              .from(products)
+              .where(eq(products.id, item.productId))
+              .limit(1);
+
+            if (prodRows.length > 0) {
+              resolvedProductName = prodRows[0].name;
+              resolvedProductSku = prodRows[0].sku;
+              isResolvedFromCatalog = true;
+
+              const imgRows = await db
+                .select({ imageUrl: productImages.imageUrl })
+                .from(productImages)
+                .where(eq(productImages.productId, item.productId))
+                .limit(1);
+              if (imgRows.length > 0) {
+                resolvedProductImage = imgRows[0].imageUrl;
+              }
+            } else {
+              resolvedProductName = "Product details unavailable (historical item)";
+            }
+          } else if (!resolvedProductName) {
+            resolvedProductName = "Product details unavailable (historical item)";
+          }
+        }
+
+        return {
+          ...item,
+          productName: resolvedProductName,
+          productSku: resolvedProductSku,
+          productImage: resolvedProductImage,
+          isResolvedFromCatalog,
+          configuration,
+          userReview: item.productId ? reviewByProductId.get(item.productId) || null : null,
+          files: files
+            .filter((f) => f.orderItemId === item.id)
+            .map((f) => ({
+              ...f,
+              downloadUrl: `/api/files/download/${f.id}`,
+            })),
+        };
+      })
+    );
 
     // Fetch timeline and payment submissions
     const rawTimeline = await timer.measure("database.timeline.fetch", () =>
@@ -226,13 +277,14 @@ export async function GET(
 
     // Payment reconciliation calculations
     const verifiedSubmissions = submissions.filter((s) => s.status === "verified");
+    const verifiedTotal = verifiedSubmissions.reduce(
+      (sum, s) => sum + ((s as any).amountClaimed || (s as any).amount || 0),
+      0
+    );
     const amountPaid =
       order.paymentStatus === "paid"
-        ? order.totalAmount
-        : verifiedSubmissions.reduce(
-            (sum, s) => sum + ((s as any).amountClaimed || (s as any).amount || 0),
-            0
-          );
+        ? Math.max(order.totalAmount, verifiedTotal)
+        : verifiedTotal;
     const amountRemaining = Math.max(0, order.totalAmount - amountPaid);
 
     return timer.finish(
@@ -417,6 +469,70 @@ export async function PATCH(
     await timer.measure("database.orders.update", () =>
       db.update(orders).set(updates).where(eq(orders.id, id))
     );
+
+    // If order is updated to 'paid', automatically reconcile pending payment submissions
+    if (paymentStatus === "paid") {
+      const pendingSubmissions = await db
+        .select()
+        .from(paymentSubmissions)
+        .where(
+          and(
+            eq(paymentSubmissions.orderId, id),
+            or(
+              eq(paymentSubmissions.status, "pending_verification"),
+              eq(paymentSubmissions.status, "review_required")
+            )
+          )
+        );
+
+      if (pendingSubmissions.length > 0) {
+        const now = Date.now();
+        for (const sub of pendingSubmissions) {
+          await db
+            .update(paymentSubmissions)
+            .set({
+              status: "verified",
+              verifiedByAdminId: auth.user.id,
+              verifiedAt: now,
+              verificationNote: "Automatically reconciled: Order marked paid by administrator.",
+              updatedAt: now,
+            })
+            .where(eq(paymentSubmissions.id, sub.id));
+
+          // Ensure master payments table has corresponding record
+          const existingPay = await db
+            .select()
+            .from(payments)
+            .where(eq(payments.transactionReference, sub.transactionId))
+            .limit(1);
+
+          if (existingPay.length === 0) {
+            await db.insert(payments).values({
+              id: `pay_${crypto.randomUUID()}`,
+              orderId: id,
+              paymentProvider: "upi",
+              transactionReference: sub.transactionId,
+              amount: sub.amount,
+              amountVerified: sub.amount,
+              currency: "INR",
+              status: "successful",
+              receivingAccountId: sub.receivingAccountId || null,
+              receivingUpiIdSnapshot: sub.receivingUpiIdSnapshot || sub.upiIdUsed,
+              receivingAccountNameSnapshot: sub.receivingAccountNameSnapshot || null,
+              verifiedByAdminId: auth.user.id,
+              verifiedAt: now,
+              paymentMetadataJson: JSON.stringify({
+                submissionId: sub.id,
+                verifiedByAdminId: auth.user.id,
+                verifiedAt: now,
+                autoReconciled: true,
+              }),
+              createdAt: now,
+            });
+          }
+        }
+      }
+    }
 
     // Determine customer timeline message based on order lifecycle and delivery type
     let customerMsg = customerFulfillmentNote?.trim() || `Order status updated to ${

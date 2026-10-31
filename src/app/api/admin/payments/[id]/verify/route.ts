@@ -55,10 +55,10 @@ export async function POST(
 
     const order = orderRows[0];
 
-    // Case O: Strict Concurrency / State Guard
-    if (submission.status === "verified" || order.paymentStatus === "paid") {
+    // Concurrency / state guard
+    if (submission.status === "verified") {
       return NextResponse.json(
-        { error: "This payment or order is already marked as paid and verified." },
+        { error: "This payment submission is already marked as verified." },
         { status: 400 }
       );
     }
@@ -110,33 +110,41 @@ export async function POST(
       })
       .where(eq(orders.id, order.id));
 
-    // 3. Record in master payments table with immutable receiving account snapshot
-    await db.insert(payments).values({
-      id: `pay_${crypto.randomUUID()}`,
-      orderId: order.id,
-      paymentProvider: "upi",
-      transactionReference: submission.transactionId,
-      amount: submission.amount,
-      amountVerified: submission.amount,
-      currency: "INR",
-      status: "successful",
-      receivingAccountId: submission.receivingAccountId || null,
-      receivingUpiIdSnapshot: submission.receivingUpiIdSnapshot || submission.upiIdUsed,
-      receivingAccountNameSnapshot: submission.receivingAccountNameSnapshot || null,
-      verifiedByAdminId: auth.user.id,
-      verifiedAt: now,
-      paymentMetadataJson: JSON.stringify({
-        submissionId: id,
+    // 3. Record in master payments table if not already present
+    const existingPay = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.transactionReference, submission.transactionId))
+      .limit(1);
+
+    if (existingPay.length === 0) {
+      await db.insert(payments).values({
+        id: `pay_${crypto.randomUUID()}`,
+        orderId: order.id,
+        paymentProvider: "upi",
+        transactionReference: submission.transactionId,
+        amount: submission.amount,
+        amountVerified: submission.amount,
+        currency: "INR",
+        status: "successful",
         receivingAccountId: submission.receivingAccountId || null,
         receivingUpiIdSnapshot: submission.receivingUpiIdSnapshot || submission.upiIdUsed,
         receivingAccountNameSnapshot: submission.receivingAccountNameSnapshot || null,
         verifiedByAdminId: auth.user.id,
         verifiedAt: now,
-        verificationNote: note,
-        isCancelledReopening,
-      }),
-      createdAt: now,
-    });
+        paymentMetadataJson: JSON.stringify({
+          submissionId: id,
+          receivingAccountId: submission.receivingAccountId || null,
+          receivingUpiIdSnapshot: submission.receivingUpiIdSnapshot || submission.upiIdUsed,
+          receivingAccountNameSnapshot: submission.receivingAccountNameSnapshot || null,
+          verifiedByAdminId: auth.user.id,
+          verifiedAt: now,
+          verificationNote: note,
+          isCancelledReopening,
+        }),
+        createdAt: now,
+      });
+    }
 
     // 4. Record order timeline history
     await recordOrderEvent({

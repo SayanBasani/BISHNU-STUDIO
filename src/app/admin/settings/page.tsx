@@ -21,6 +21,14 @@ import {
   Truck,
   ExternalLink,
   Code2,
+  AlertTriangle,
+  Trash2,
+  ShieldAlert,
+  Eye,
+  EyeOff,
+  Loader2,
+  X,
+  AlertCircle,
 } from "lucide-react";
 
 export default function AdminSettingsPage() {
@@ -28,12 +36,79 @@ export default function AdminSettingsPage() {
   const [shopSettings, setShopSettings] = useState<any>(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
 
+  // Development Cleanup States
+  const [showCleanupModal, setShowCleanupModal] = useState(false);
+  const [cleanupStep, setCleanupStep] = useState<1 | 2>(1);
+  const [cleanupPreview, setCleanupPreview] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [cleanupPassword, setCleanupPassword] = useState("");
+  const [showCleanupPassword, setShowCleanupPassword] = useState(false);
+  const [cleanupConfirmation, setCleanupConfirmation] = useState("");
+  const [wiping, setWiping] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<any>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+
   const hashCommand = `node -e "console.log(require('bcryptjs').hashSync('YourStrongPasswordHere', 10))"`;
 
   const handleCopyCmd = () => {
     navigator.clipboard.writeText(hashCommand);
     setCopiedHashCmd(true);
     setTimeout(() => setCopiedHashCmd(false), 2000);
+  };
+
+  const openCleanupModal = async () => {
+    setShowCleanupModal(true);
+    setCleanupStep(1);
+    setCleanupError(null);
+    setCleanupResult(null);
+    setCleanupPassword("");
+    setCleanupConfirmation("");
+    setLoadingPreview(true);
+    try {
+      const res = await fetch("/api/admin/dev-cleanup/preview");
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to load cleanup preview");
+      }
+      setCleanupPreview(data);
+    } catch (err: any) {
+      setCleanupError(err.message || "Failed to load preview");
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleExecuteWipe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cleanupConfirmation !== "WIPE DEVELOPMENT DATA") {
+      setCleanupError("Confirmation phrase must exactly match 'WIPE DEVELOPMENT DATA'");
+      return;
+    }
+    if (!cleanupPassword) {
+      setCleanupError("Please enter your administrator password.");
+      return;
+    }
+    setWiping(true);
+    setCleanupError(null);
+    try {
+      const res = await fetch("/api/admin/dev-cleanup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: cleanupPassword,
+          confirmation: cleanupConfirmation,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to wipe development data");
+      }
+      setCleanupResult(data);
+    } catch (err: any) {
+      setCleanupError(err.message || "Wipe execution failed");
+    } finally {
+      setWiping(false);
+    }
   };
 
   useEffect(() => {
@@ -406,6 +481,302 @@ export default function AdminSettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* DANGER ZONE: Development Data Management */}
+      <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-rose-200/60 dark:border-rose-900/40 pb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Danger Zone: Development Data Cleanup
+                </h2>
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                  Development Only
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                Permanently purge dummy development orders, customer accounts, payment submissions, and sandbox files. Administrative credentials, database schema migrations, and default catalog baseline remain strictly preserved.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openCleanupModal}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm hover:shadow transition shrink-0 cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4" />
+            Wipe Development Data
+          </button>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+          <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+          <span>Requires administrator password re-authentication and typing confirmation phrase. Strictly forbidden in production environments.</span>
+        </div>
+      </div>
+
+      {/* Two-Step Wipe Modal */}
+      {showCleanupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-xl w-full p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 dark:text-white text-base">
+                    Wipe Development Database & Files
+                  </h3>
+                  <span className="text-xs text-slate-400">
+                    Step {cleanupStep} of 2: {cleanupStep === 1 ? "Impact & Scope Preview" : "Authorization & Confirmation"}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCleanupModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Error or Success notification */}
+            {cleanupError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-xs font-bold text-rose-800 dark:text-rose-200 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{cleanupError}</span>
+              </div>
+            )}
+
+            {cleanupResult ? (
+              <div className="space-y-4 py-2">
+                <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs space-y-2">
+                  <div className="flex items-center gap-2 font-extrabold text-sm text-emerald-900 dark:text-emerald-100">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    Wipe Completed Successfully
+                  </div>
+                  <p>{cleanupResult.message}</p>
+                </div>
+
+                {cleanupResult.deleted && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    {Object.entries(cleanupResult.deleted).map(([key, val]) => (
+                      <div
+                        key={key}
+                        className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center"
+                      >
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                          {key.replace(/([A-Z])/g, " $1")}
+                        </span>
+                        <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
+                          {String(val)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCleanupModal(false);
+                      window.location.reload();
+                    }}
+                    className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs transition shadow-sm"
+                  >
+                    Done & Refresh Dashboard
+                  </button>
+                </div>
+              </div>
+            ) : cleanupStep === 1 ? (
+              <div className="space-y-4">
+                {loadingPreview ? (
+                  <div className="py-12 text-center space-y-2">
+                    <Loader2 className="w-8 h-8 text-rose-600 animate-spin mx-auto" />
+                    <p className="text-xs text-slate-400 font-medium">Scanning development records & files...</p>
+                  </div>
+                ) : cleanupPreview ? (
+                  <>
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                        Records and Files To Be Purged:
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div className="p-2.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-center">
+                          <span className="text-[10px] uppercase font-bold text-rose-500 block">Customers</span>
+                          <span className="text-base font-black font-mono text-rose-700 dark:text-rose-300">
+                            {cleanupPreview.counts?.customers ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-center">
+                          <span className="text-[10px] uppercase font-bold text-rose-500 block">Orders</span>
+                          <span className="text-base font-black font-mono text-rose-700 dark:text-rose-300">
+                            {cleanupPreview.counts?.orders ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-center">
+                          <span className="text-[10px] uppercase font-bold text-rose-500 block">Order Items</span>
+                          <span className="text-base font-black font-mono text-rose-700 dark:text-rose-300">
+                            {cleanupPreview.counts?.orderItems ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-center">
+                          <span className="text-[10px] uppercase font-bold text-rose-500 block">Uploaded Files</span>
+                          <span className="text-base font-black font-mono text-rose-700 dark:text-rose-300">
+                            {cleanupPreview.counts?.uploadedFiles ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Payment Claims</span>
+                          <span className="text-base font-black font-mono text-slate-800 dark:text-slate-200">
+                            {cleanupPreview.counts?.paymentSubmissions ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Payments</span>
+                          <span className="text-base font-black font-mono text-slate-800 dark:text-slate-200">
+                            {cleanupPreview.counts?.payments ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Reviews</span>
+                          <span className="text-base font-black font-mono text-slate-800 dark:text-slate-200">
+                            {cleanupPreview.counts?.productReviews ?? 0}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Notifications</span>
+                          <span className="text-base font-black font-mono text-slate-800 dark:text-slate-200">
+                            {cleanupPreview.counts?.notifications ?? 0}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs space-y-1.5">
+                      <span className="font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Guaranteed Preserved Baseline Assets:
+                      </span>
+                      <ul className="list-disc list-inside text-emerald-800 dark:text-emerald-300 text-[11px] space-y-0.5">
+                        {cleanupPreview.preserved?.map((p: string, i: number) => (
+                          <li key={i}>{p}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="pt-2 flex justify-between items-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowCleanupModal(false)}
+                        className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCleanupError(null);
+                          setCleanupStep(2);
+                        }}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm transition"
+                      >
+                        Proceed to Authorization &rarr;
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <form onSubmit={handleExecuteWipe} className="space-y-4">
+                <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    IRREVERSIBLE ACTION WARNING
+                  </div>
+                  <p>
+                    All sandbox customer records, delivery orders, uploaded production PDFs/photos, and payment verification claims will be permanently deleted.
+                  </p>
+                </div>
+
+                {/* Password Input */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Administrator Password (Re-authentication)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showCleanupPassword ? "text" : "password"}
+                      value={cleanupPassword}
+                      onChange={(e) => setCleanupPassword(e.target.value)}
+                      placeholder="Enter your admin password"
+                      required
+                      className="w-full px-3 py-2 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-rose-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCleanupPassword(!showCleanupPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                    >
+                      {showCleanupPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Typed confirmation input */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Type <code className="font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/40 px-1 py-0.5 rounded">WIPE DEVELOPMENT DATA</code> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={cleanupConfirmation}
+                    onChange={(e) => setCleanupConfirmation(e.target.value)}
+                    placeholder="WIPE DEVELOPMENT DATA"
+                    required
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-between items-center">
+                  <button
+                    type="button"
+                    disabled={wiping}
+                    onClick={() => setCleanupStep(1)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition disabled:opacity-50"
+                  >
+                    &larr; Back to Scope
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={wiping || cleanupConfirmation !== "WIPE DEVELOPMENT DATA" || !cleanupPassword}
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold shadow-sm transition"
+                  >
+                    {wiping ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Purging Data & Files...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        Permanently Wipe Development Data
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

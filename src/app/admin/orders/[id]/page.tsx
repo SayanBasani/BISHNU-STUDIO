@@ -69,6 +69,13 @@ export default function AdminOrderDetailPage() {
   // Image lightbox
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // Payment submission inline action states
+  const [verifyingSubId, setVerifyingSubId] = useState<string | null>(null);
+  const [rejectingSubId, setRejectingSubId] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [subActionError, setSubActionError] = useState<string | null>(null);
+  const [subActionSuccess, setSubActionSuccess] = useState<string | null>(null);
+
   useEffect(() => {
     if (orderId) fetchOrderDetail();
   }, [orderId]);
@@ -142,6 +149,62 @@ export default function AdminOrderDetailPage() {
     navigator.clipboard.writeText(text);
     setCopiedText(label);
     setTimeout(() => setCopiedText(null), 2000);
+  };
+
+  const handleVerifySubmission = async (submissionId: string) => {
+    setVerifyingSubId(submissionId);
+    setSubActionError(null);
+    setSubActionSuccess(null);
+    try {
+      const res = await fetch(`/api/admin/payments/${submissionId}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          verificationNote: "Verified directly via Order Details page",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to verify payment claim");
+      }
+      setSubActionSuccess("Payment claim successfully verified!");
+      await fetchOrderDetail();
+    } catch (err: any) {
+      setSubActionError(err.message || "Failed to verify submission");
+    } finally {
+      setVerifyingSubId(null);
+    }
+  };
+
+  const handleRejectSubmission = async (submissionId: string) => {
+    if (!rejectionReason.trim()) {
+      setSubActionError("Please provide a reason for rejecting the payment claim.");
+      return;
+    }
+    setVerifyingSubId(submissionId);
+    setSubActionError(null);
+    setSubActionSuccess(null);
+    try {
+      const res = await fetch(`/api/admin/payments/${submissionId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rejectionReason: rejectionReason.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to reject payment claim");
+      }
+      setSubActionSuccess("Payment claim rejected.");
+      setRejectingSubId(null);
+      setRejectionReason("");
+      await fetchOrderDetail();
+    } catch (err: any) {
+      setSubActionError(err.message || "Failed to reject submission");
+    } finally {
+      setVerifyingSubId(null);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -553,19 +616,59 @@ export default function AdminOrderDetailPage() {
             const config = item.configuration || {};
             const files = item.files || [];
 
+            // Friendly display title
+            const itemTitle =
+              item.itemType === "product"
+                ? (item.productName || config.productName || "Product details unavailable (historical item)")
+                : item.itemType === "pvc_card"
+                ? `PVC Smart Card — ${(config.documentType || "Standard").toUpperCase()}`
+                : item.itemType === "document_print"
+                ? `Document Printing — ${config.paperSize || "A4"} (${config.printMode === "color" ? "Color" : "B&W"})`
+                : item.itemType === "lamination"
+                ? `Thermal Lamination — ${(config.laminationSize || "A4").toUpperCase()}`
+                : item.itemType === "photo_print"
+                ? `Photo Studio Print — ${config.photoSize || "4x6"} (${config.photoFinish || "Glossy"})`
+                : item.itemType.replace(/_/g, " ");
+
+            const itemThumb = item.productImage || config.productImageUrl;
+            const itemSku = item.productSku || config.productSku;
+
             return (
               <div
                 key={item.id}
                 className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 space-y-3"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-700 pb-2.5">
-                  <div>
-                    <span className="font-extrabold text-slate-900 dark:text-white text-sm capitalize">
-                      {idx + 1}. {item.itemType.replace(/_/g, " ")}
-                    </span>
-                    <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300">
-                      Qty: {item.quantity}
-                    </span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-700 pb-2.5">
+                  <div className="flex items-center gap-3">
+                    {itemThumb && (
+                      <div className="w-12 h-12 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shrink-0">
+                        <img
+                          src={itemThumb}
+                          alt={itemTitle}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-extrabold text-slate-900 dark:text-white text-sm">
+                          {idx + 1}. {itemTitle}
+                        </span>
+                        {item.isResolvedFromCatalog && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            Catalog Item
+                          </span>
+                        )}
+                        {itemSku && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                            SKU: {itemSku}
+                          </span>
+                        )}
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300">
+                          Qty: {item.quantity}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                   <div className="font-mono text-xs font-bold text-slate-900 dark:text-white text-right">
                     <span>
@@ -581,7 +684,15 @@ export default function AdminOrderDetailPage() {
                 {Object.keys(config).length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     {Object.entries(config).map(([key, val]) => {
-                      if (key === "uploadedFiles" || val === null || val === undefined) return null;
+                      if (
+                        key === "uploadedFiles" ||
+                        key === "productName" ||
+                        key === "productSku" ||
+                        key === "productImageUrl" ||
+                        val === null ||
+                        val === undefined
+                      )
+                        return null;
                       return (
                         <div
                           key={key}
@@ -699,6 +810,30 @@ export default function AdminOrderDetailPage() {
           </div>
         </div>
 
+        {/* Action feedback */}
+        {subActionSuccess && (
+          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-800 dark:text-emerald-200 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              {subActionSuccess}
+            </span>
+            <button onClick={() => setSubActionSuccess(null)} className="p-1 hover:opacity-75">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        {subActionError && (
+          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-xs font-bold text-rose-800 dark:text-rose-200 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600" />
+              {subActionError}
+            </span>
+            <button onClick={() => setSubActionError(null)} className="p-1 hover:opacity-75">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* UPI Submissions Table */}
         {submissions.length > 0 ? (
           <div className="space-y-3 pt-2">
@@ -770,20 +905,93 @@ export default function AdminOrderDetailPage() {
                     </div>
                   </div>
 
-                  {/* Payment Proof Screenshot */}
-                  {sub.paymentProofUrl && (
-                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-3">
-                      <span className="font-semibold text-slate-600 dark:text-slate-400 text-xs">
-                        Proof Screenshot:
-                      </span>
-                      <button
-                        onClick={() => setPreviewImage(sub.paymentProofUrl)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-semibold text-xs transition"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View Screenshot
-                      </button>
-                    </div>
-                  )}
+                  {/* Payment Proof Screenshot & Inline Verification Controls */}
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                    {sub.paymentProofUrl ? (
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-600 dark:text-slate-400 text-xs">
+                          Proof Screenshot:
+                        </span>
+                        <button
+                          onClick={() => setPreviewImage(sub.paymentProofUrl)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-semibold text-xs transition"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View Screenshot
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">No screenshot attached</span>
+                    )}
+
+                    {/* Inline Verification and Rejection Controls */}
+                    {sub.status === "verified" ? (
+                      <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-semibold text-xs bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Verified Claim{sub.verificationNote ? ` — ${sub.verificationNote}` : ""}</span>
+                      </div>
+                    ) : sub.status === "rejected" ? (
+                      <div className="flex items-center gap-1.5 text-rose-700 dark:text-rose-400 font-semibold text-xs bg-rose-50 dark:bg-rose-950/50 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Rejected: {sub.rejectionReason || "Proof unverified"}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {rejectingSubId === sub.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={rejectionReason}
+                              onChange={(e) => setRejectionReason(e.target.value)}
+                              placeholder="Reason (e.g. UTR not in bank)"
+                              className="px-2.5 py-1 text-xs rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 font-medium text-slate-900 dark:text-white"
+                            />
+                            <button
+                              onClick={() => handleRejectSubmission(sub.id)}
+                              disabled={verifyingSubId === sub.id}
+                              className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs disabled:opacity-50"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={() => {
+                                setRejectingSubId(null);
+                                setRejectionReason("");
+                              }}
+                              className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleVerifySubmission(sub.id)}
+                              disabled={verifyingSubId === sub.id}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition disabled:opacity-50"
+                            >
+                              {verifyingSubId === sub.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              )}
+                              Verify Claim
+                            </button>
+                            <button
+                              onClick={() => {
+                                setRejectingSubId(sub.id);
+                                setRejectionReason("UTR reference does not match bank credits");
+                              }}
+                              disabled={verifyingSubId === sub.id}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100 border border-rose-200 dark:border-rose-800 font-bold text-xs transition disabled:opacity-50"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              Reject Claim
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

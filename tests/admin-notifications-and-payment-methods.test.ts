@@ -265,9 +265,9 @@ describe("Password Visibility & Admin UI Architecture Integrity", () => {
       "utf-8"
     );
 
-    expect(adminOrdersCode).toContain("<th className=\"py-3 px-4\">Payment Method</th>");
-    expect(adminOrdersCode).toContain("<th className=\"py-3 px-4\">Payment Status</th>");
-    expect(adminOrdersCode).toContain("<th className=\"py-3 px-4\">Order Status</th>");
+    expect(adminOrdersCode).toMatch(/<th[^>]*>Payment Method<\/th>/);
+    expect(adminOrdersCode).toMatch(/<th[^>]*>Payment Status<\/th>/);
+    expect(adminOrdersCode).toMatch(/<th[^>]*>Order Status<\/th>/);
     expect(adminOrdersCode).toContain("formatPaymentMethod(ord.paymentMethod)");
     expect(adminOrdersCode).toContain("getPaymentMethodBadgeClass(");
   });
