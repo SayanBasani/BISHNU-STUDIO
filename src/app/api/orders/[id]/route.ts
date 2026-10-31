@@ -520,14 +520,14 @@ export async function PATCH(
 
     if (!customerFulfillmentNote?.trim()) {
       if (orderStatus === "confirmed") {
-        customerMsg = "Order confirmed. Our team has verified order specifications.";
+        customerMsg = "Order confirmed. Our team has verified order details.";
       } else if (orderStatus === "processing") {
-        customerMsg = "Your print order is actively being processed in our studio.";
+        customerMsg = "Your order is actively being prepared.";
       } else if (orderStatus === "ready_for_collection") {
         if (existingOrder.deliveryType === "home_delivery") {
-          customerMsg = "Your order has been packaged and prepared for courier dispatch.";
+          customerMsg = "Your order has been packaged and is ready for courier dispatch.";
         } else {
-          customerMsg = "Your order is ready for counter pickup at our studio!";
+          customerMsg = "Your order is ready for collection at our counter!";
         }
       } else if (orderStatus === "out_for_delivery") {
         const carrier = courierName || existingOrder.courierName;
@@ -539,7 +539,7 @@ export async function PATCH(
         if (existingOrder.deliveryType === "home_delivery") {
           customerMsg = "Order delivered successfully to your doorstep. Thank you for your business!";
         } else {
-          customerMsg = "Order collected at studio counter. Thank you for your business!";
+          customerMsg = "Order collected by customer. Thank you for your business!";
         }
       } else if (orderStatus === "cancelled") {
         customerMsg = "Order has been cancelled.";

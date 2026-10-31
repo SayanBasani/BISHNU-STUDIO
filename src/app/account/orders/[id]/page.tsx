@@ -6,6 +6,11 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { formatINR, formatDate } from "@/lib/utils";
 import {
+  getFulfillmentMilestones,
+  determineOrderCategory,
+  getActiveMilestoneIndex,
+} from "@/lib/order-state-machine";
+import {
   Package,
   CheckCircle2,
   Check,
@@ -162,7 +167,7 @@ export default function OrderTrackingDetailPage() {
               ifsc: refundIfsc.trim().toUpperCase(),
               bankName: refundBankName.trim(),
             }
-          : { counterLocation: "Bishnu Studio Main Counter" };
+          : { counterLocation: "Store Main Counter" };
 
       const res = await fetch("/api/returns", {
         method: "POST",
@@ -221,7 +226,7 @@ export default function OrderTrackingDetailPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to record dispute.");
 
-      setDisputeSuccess("Your refund dispute has been submitted to studio management with high priority.");
+      setDisputeSuccess("Your refund dispute has been submitted to management with high priority.");
       setTimeout(async () => {
         setDisputeModalOpen(false);
         setDisputingReturn(null);
@@ -339,23 +344,25 @@ export default function OrderTrackingDetailPage() {
   const isUpiOrder = order.paymentMethod === "upi_mock";
   const rawTimeline: TimelineEvent[] = order.timeline || [];
 
-  // Construct 5 standard fulfillment milestones based on real persisted order state
-  const isDelivery = order.deliveryType === "home_delivery";
+  // Construct contextual fulfillment milestones based on real delivery method and product nature
+  const isDelivery = order.deliveryType === "home_delivery" || order.deliveryType === "courier_delivery";
+  const orderCategory = determineOrderCategory(order.items || []);
+  const isServiceOrder = orderCategory === "service" || orderCategory === "mixed";
   const milestones = [
     {
       key: "placed",
       title: "Order Placed",
-      subtitle: "Order reference registered",
+      subtitle: isServiceOrder ? "Files and specs submitted" : "Order reference registered",
     },
     {
       key: "confirmed",
-      title: "Confirmed & Approved",
+      title: isServiceOrder ? "Confirmed & Approved" : "Order Confirmed",
       subtitle: order.paymentStatus === "paid" ? "Payment verified" : "Awaiting payment verification",
     },
     {
       key: "processing",
-      title: "Print Room Processing",
-      subtitle: "Printing & packaging",
+      title: isServiceOrder ? "Print Room Processing" : "Preparing Your Order",
+      subtitle: isServiceOrder ? "In production" : "Items picked and packed",
     },
     {
       key: "ready",
@@ -408,7 +415,7 @@ export default function OrderTrackingDetailPage() {
   activityEvents.push({
     id: `base_${order.id}`,
     title: "Order Placed & Logged",
-    description: `Order reference ${order.orderReference} was generated and recorded in Bishnu Studio.`,
+    description: `Order reference ${order.orderReference} was generated and recorded in system.`,
     timestamp: order.createdAt,
     icon: Package,
     statusVariant: "completed",
@@ -425,7 +432,7 @@ export default function OrderTrackingDetailPage() {
           ? "Payment Proof Rejected"
           : "Payment Proof Submitted",
         description: sub.status === "verified"
-          ? `UTR #${sub.transactionId} was verified against studio bank accounts.`
+          ? `UTR #${sub.transactionId} was verified against bank accounts.`
           : sub.status === "rejected"
           ? `Proof rejected: ${sub.rejectionNote || sub.rejectionReason || "Please verify your UTR and resubmit."}`
           : `Customer uploaded screenshot and submitted UTR #${sub.transactionId} for verification.`,
@@ -462,7 +469,7 @@ export default function OrderTrackingDetailPage() {
           ev.customerMessage ||
           (isDelivery
             ? "Order is packaged and awaiting courier dispatch."
-            : "Order is packaged and waiting at Bishnu Studio counter.");
+            : "Order is packaged and waiting at collection counter.");
         icon = isDelivery ? Package : Store;
         variant = "active";
         break;
@@ -474,7 +481,7 @@ export default function OrderTrackingDetailPage() {
         break;
       case "completed":
         title = isDelivery ? "Order Delivered Successfully" : "Order Collected by Customer";
-        desc = ev.customerMessage || "Fulfillment completed and verified by studio staff.";
+        desc = ev.customerMessage || "Fulfillment completed and verified by staff.";
         icon = CheckCircle2;
         variant = "completed";
         break;
@@ -670,7 +677,7 @@ export default function OrderTrackingDetailPage() {
                   </div>
                   <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                     {order.paymentStatus === "paid"
-                      ? "Your UPI payment has been verified by the studio. Printing and processing are underway."
+                      ? "Your UPI payment has been verified. Order processing is underway."
                       : latestPayment?.status === "pending_verification"
                       ? `Your UTR #${latestPayment.transactionId} and payment screenshot are being verified against shop accounts.`
                       : latestPayment?.status === "rejected"
@@ -704,15 +711,22 @@ export default function OrderTrackingDetailPage() {
                   Live Fulfillment Journey
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Real-time status tracking based on verified studio production events
+                  Real-time status tracking based on verified fulfillment events
                 </p>
               </div>
 
-              {order.orderStatus === "completed" && (
-                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5" /> Order Fulfilled
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {order.orderStatus === "completed" && (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5" /> Order Fulfilled
+                  </span>
+                )}
+                {orderReturnsList.length > 0 && (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-200 dark:border-purple-800 flex items-center gap-1.5 animate-pulse motion-reduce:animate-none">
+                    <RotateCcw className="w-3.5 h-3.5" /> Return / Exchange Active
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="overflow-x-auto pb-4 pt-2">
@@ -798,6 +812,317 @@ export default function OrderTrackingDetailPage() {
             </div>
           </div>
         )}
+
+        {/* PROMINENT ACTIVE RETURN & EXCHANGE JOURNEY SECTION (Problem A & Milestone BS-FINAL-03) */}
+        {orderReturnsList.length > 0 && (
+          <div id="returns-section" className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-purple-300 dark:border-purple-700/80 p-6 sm:p-8 space-y-6 shadow-md text-xs">
+            <div className="border-b border-purple-100 dark:border-purple-800/60 pb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-950 flex items-center justify-center text-purple-600 dark:text-purple-300">
+                  <RotateCcw className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                    Active Return &amp; Refund Journey
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Dedicated lifecycle tracking for requested items &bull; Original delivery preserved
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs px-3 py-1 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800">
+                {orderReturnsList.length} Return Request(s)
+              </span>
+            </div>
+
+            <div className="space-y-6">
+              {orderReturnsList.map((ret: any) => {
+                const isPhysicalDone =
+                  ret.status === "return_completed" || ret.status === "completed";
+                const isRejected = ret.status === "rejected" || ret.status === "cancelled";
+                const isPaid = ret.refundStatus === "paid" || ret.status === "refund_processed";
+                const isDisputed = ret.refundStatus === "disputed";
+                const isExchange = ret.requestedResolution === "exchange";
+
+                // Physical journey milestones:
+                // 1: Requested -> 2: Approved -> 3: Picked Up / Handover -> 4: Inspection -> 5: Completed
+                let physicalStep = 1;
+                if (ret.status === "approved" || ret.status === "pickup_scheduled") physicalStep = 2;
+                else if (
+                  ret.status === "picked_up" ||
+                  ret.status === "counter_dropoff" ||
+                  ret.status === "in_transit" ||
+                  ret.status === "received_at_studio" ||
+                  ret.status === "received"
+                ) physicalStep = 3;
+                else if (
+                  ret.status === "inspection_in_progress" ||
+                  ret.status === "inspection_passed" ||
+                  ret.status === "inspection_failed"
+                ) physicalStep = 4;
+                else if (isPhysicalDone) physicalStep = 5;
+
+                return (
+                  <div
+                    key={ret.id}
+                    id={"return-" + ret.id}
+                    className="p-5 sm:p-6 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/60 space-y-5"
+                  >
+                    {/* Return Title & Status Badges */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-purple-100 dark:border-purple-800/40 pb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-base text-slate-900 dark:text-white">
+                            {ret.returnReference}
+                          </span>
+                          <span className={"px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " + (
+                            isExchange ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200" : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200"
+                          )}>
+                            {isExchange ? "Exchange Request" : "Refund Request"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Reason: <strong className="capitalize text-slate-700 dark:text-slate-300">{ret.reason.replace(/_/g, " ")}</strong>
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={"px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider " + (
+                            isPhysicalDone
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                              : isRejected
+                              ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                              : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
+                          )}
+                        >
+                          Physical: {ret.status.replace(/_/g, " ")}
+                        </span>
+
+                        {!isExchange && (
+                          <span
+                            className={"px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider " + (
+                              isPaid
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                : isDisputed
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                                : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            )}
+                          >
+                            Refund: {(ret.refundStatus || "pending_review").replace(/_/g, " ")}
+                          </span>
+                        )}
+
+                        {isExchange && (
+                          <span
+                            className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200"
+                          >
+                            Replacement: {(ret.exchangeStatus || "requested").replace(/_/g, " ")}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Contextual Next Action Callout Card */}
+                    <div className="p-3.5 rounded-xl bg-purple-100/70 dark:bg-purple-950/60 border border-purple-200 dark:border-purple-800 text-xs space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-purple-600 animate-pulse" />
+                        <span className="font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wider text-[11px]">
+                          Current Stage &amp; Next Action
+                        </span>
+                      </div>
+                      <p className="text-slate-800 dark:text-slate-200 font-medium leading-relaxed">
+                        {ret.status === "requested" && "Your request has been submitted and is currently being reviewed by our staff. You will receive updates shortly."}
+                        {ret.status === "under_review" && "Your request is under review. Pickup or drop-off arrangements will be scheduled upon approval."}
+                        {ret.status === "approved" && (ret.pickupMethod === "counter_dropoff"
+                          ? "Return approved! Please bring the item(s) to our collection counter with original accessories."
+                          : ("Return approved! Courier partner " + (ret.courierName ? "(" + ret.courierName + ")" : "") + " has been assigned for pickup."))}
+                        {ret.status === "pickup_scheduled" && ("Pickup scheduled with " + (ret.courierName || "courier") + (ret.expectedPickupDate ? " on " + ret.expectedPickupDate : "") + ". Please hand over package.")}
+                        {(ret.status === "picked_up" || ret.status === "counter_dropoff" || ret.status === "in_transit") && "Item has been handed over and is en route to our return location for verification."}
+                        {(ret.status === "received_at_studio" || ret.status === "received" || ret.status === "inspection_in_progress") && "Package received at return location. Quality condition inspection is currently underway."}
+                        {ret.status === "inspection_passed" && (isExchange
+                          ? (ret.replacementOrderId ? ("Inspection passed! Replacement order #" + ret.replacementOrderId + " is processing.") : "Inspection passed! Staff is preparing your replacement order.")
+                          : "Inspection passed! Refund disbursement is approved and being processed by finance.")}
+                        {ret.status === "inspection_failed" && ("Inspection failed: " + (ret.inspectionNotes || "Item does not meet return policy condition standards") + ".")}
+                        {ret.status === "rejected" && ("Return request declined: " + (ret.rejectionReason || "Does not meet policy guidelines") + ".")}
+                        {isPhysicalDone && (isExchange ? "Exchange successfully completed." : (isPaid ? "Refund settled and disbursed. Funds transferred." : "Physical return completed. Final settlement in progress."))}
+                      </p>
+                    </div>
+
+                    {/* Physical Return Stepper */}
+                    <div className="space-y-2">
+                      <span className="font-bold text-[11px] text-slate-600 dark:text-slate-400 uppercase tracking-wider block">
+                        Lifecycle Progression
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-[10px]">
+                        <div className={"p-2.5 rounded-xl border " + (physicalStep >= 1 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700")}>
+                          1. Requested
+                        </div>
+                        <div className={"p-2.5 rounded-xl border " + (physicalStep >= 2 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700")}>
+                          2. Approved / Pickup
+                        </div>
+                        <div className={"p-2.5 rounded-xl border " + (physicalStep >= 3 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700")}>
+                          3. In Transit &bull; Location
+                        </div>
+                        <div className={"p-2.5 rounded-xl border " + (physicalStep >= 4 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700")}>
+                          4. Quality Inspected
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Courier / Logistics Details */}
+                    {ret.courierName && (
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] space-y-1">
+                        <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <Truck className="w-3.5 h-3.5 text-purple-600" /> Pickup Partner: {ret.courierName}
+                        </p>
+                        {ret.trackingNumber && (
+                          <p className="font-mono text-slate-600 dark:text-slate-300">
+                            AWB Tracking Ref: <strong>{ret.trackingNumber}</strong>
+                          </p>
+                        )}
+                        {ret.trackingUrl && (
+                          <a
+                            href={ret.trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-purple-600 hover:underline font-bold inline-flex items-center gap-1"
+                          >
+                            Track Pickup Live <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Staff Instructions */}
+                    {ret.customerInstructions && (
+                      <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-[11px]">
+                        <strong>Staff Instructions:</strong> {ret.customerInstructions}
+                      </div>
+                    )}
+
+                    {/* Rejection Notice if rejected */}
+                    {ret.rejectionReason && (
+                      <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-[11px]">
+                        <strong>Decline Reason:</strong> {ret.rejectionReason}
+                      </div>
+                    )}
+
+                    {/* Exchange Details Card */}
+                    {isExchange && (
+                      <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-[11px] space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                            <RotateCcw className="w-4 h-4" /> Replacement Fulfillment
+                          </span>
+                          <span className="font-bold text-blue-800 dark:text-blue-300 uppercase">
+                            {ret.exchangeStatus || "Processing"}
+                          </span>
+                        </div>
+                        {ret.replacementOrderId && (
+                          <p className="text-slate-700 dark:text-slate-300">
+                            Replacement Order:{" "}
+                            <Link
+                              href={"/account/orders/" + ret.replacementOrderId}
+                              className="font-mono font-bold text-blue-600 hover:underline"
+                            >
+                              #{ret.replacementOrderId}
+                            </Link>
+                          </p>
+                        )}
+                        {ret.exchangePriceDifference !== 0 && (
+                          <p className="text-slate-600 dark:text-slate-300">
+                            Price Difference: <strong className="font-mono">{formatINR(ret.exchangePriceDifference || 0)}</strong>
+                          </p>
+                        )}
+                        {ret.exchangeNotes && (
+                          <p className="text-slate-600 dark:text-slate-400">
+                            Notes: {ret.exchangeNotes}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Customer Refund Destination Preference */}
+                    {!isExchange && ret.refundDestination && (
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] space-y-1 text-slate-600 dark:text-slate-300">
+                        <span className="font-bold text-slate-900 dark:text-white block">
+                          Your Chosen Payout Destination:
+                        </span>
+                        {ret.refundDestination.upiId && (
+                          <p>UPI ID: <span className="font-mono font-bold text-purple-600">{ret.refundDestination.upiId}</span></p>
+                        )}
+                        {ret.refundDestination.accountNumber && (
+                          <p>
+                            Bank Transfer: {ret.refundDestination.bankName || "Bank"} (Account: <span className="font-mono">{ret.refundDestination.accountNumber}</span>)
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Verified Refund Settlement Card (Paid) */}
+                    {!isExchange && isPaid && (
+                      <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                            Refund Disbursed &amp; Settled
+                          </span>
+                          <span className="font-black text-sm text-emerald-700 dark:text-emerald-300 font-mono">
+                            {formatINR(ret.refundAmount || order.totalAmount)}
+                          </span>
+                        </div>
+
+                        <p className="text-[11px]">
+                          Payout Reference: <strong className="font-mono">{ret.refundTransactionReference || "Verified Transfer"}</strong>
+                          {ret.refundDisbursedAt && (" • Disbursed on " + new Date(ret.refundDisbursedAt).toLocaleDateString("en-IN"))}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-3 pt-1">
+                          {ret.refundProofUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setProofPreviewUrl(ret.refundProofUrl)}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Inspect Payout Receipt
+                            </button>
+                          )}
+
+                          {!isDisputed && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDisputingReturn(ret);
+                                setDisputeModalOpen(true);
+                              }}
+                              className="px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 hover:bg-amber-100 text-[11px] font-semibold transition"
+                            >
+                              Dispute Refund / Payment Not Received
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Disputed Alert Banner for Customer */}
+                    {!isExchange && isDisputed && (
+                      <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100 text-[11px] space-y-1">
+                        <p className="font-bold flex items-center gap-1.5">
+                          <AlertTriangle className="w-4 h-4 text-amber-600" /> Dispute Under Review by Finance Team
+                        </p>
+                        <p>
+                          You reported: &ldquo;{ret.refundDisputeReason || "Payment discrepancy"}&rdquo;. Our manager will contact you with resolution details.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
 
         {/* Main Grid: Items & Specs (Left) vs Upgraded Activity Timeline & Payment Summary (Right) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -1044,7 +1369,7 @@ export default function OrderTrackingDetailPage() {
                 {order.deliveryType === "store_pickup" ? (
                   <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 space-y-1 border border-blue-100 dark:border-blue-900/60">
                     <p className="font-bold flex items-center gap-1.5">
-                      <Store className="w-3.5 h-3.5" /> Bishnu Studio Counter
+                      <Store className="w-3.5 h-3.5" /> Store Collection Counter
                     </p>
                     <p className="text-[11px]">
                       12/B Station Road, Main Market, Barasat, West Bengal - 700001
@@ -1176,226 +1501,6 @@ export default function OrderTrackingDetailPage() {
                 )}
               </div>
             </div>
-
-            {/* Complete Return & Refund Journey Section */}
-            {orderReturnsList.length > 0 && (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-purple-200 dark:border-purple-800/60 p-6 space-y-6 shadow-sm text-xs">
-                <div className="border-b border-purple-100 dark:border-purple-800/60 pb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                    <RotateCcw className="w-4 h-4 text-purple-600" /> Return &amp; Refund Journey
-                  </h3>
-                  <span className="text-[11px] text-purple-700 dark:text-purple-300 font-semibold">
-                    {orderReturnsList.length} Return Request(s)
-                  </span>
-                </div>
-
-                <div className="space-y-6">
-                  {orderReturnsList.map((ret: any) => {
-                    const isPhysicalDone =
-                      ret.status === "return_completed" || ret.status === "completed";
-                    const isRejected = ret.status === "rejected" || ret.status === "cancelled";
-                    const isPaid = ret.refundStatus === "paid" || ret.status === "refund_processed";
-                    const isDisputed = ret.refundStatus === "disputed";
-
-                    // Physical journey milestones:
-                    // 1: Requested -> 2: Approved -> 3: Picked Up / Received -> 4: Inspection -> 5: Completed
-                    let physicalStep = 1;
-                    if (ret.status === "approved" || ret.status === "pickup_scheduled") physicalStep = 2;
-                    else if (
-                      ret.status === "picked_up" ||
-                      ret.status === "counter_dropoff" ||
-                      ret.status === "in_transit" ||
-                      ret.status === "received_at_studio" ||
-                      ret.status === "received"
-                    ) physicalStep = 3;
-                    else if (
-                      ret.status === "inspection_in_progress" ||
-                      ret.status === "inspection_passed" ||
-                      ret.status === "inspection_failed"
-                    ) physicalStep = 4;
-                    else if (isPhysicalDone) physicalStep = 5;
-
-                    return (
-                      <div
-                        key={ret.id}
-                        className="p-5 rounded-2xl bg-purple-50/40 dark:bg-purple-950/20 border border-purple-200/80 dark:border-purple-800/50 space-y-4"
-                      >
-                        {/* Return Title & Status Badges */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100 dark:border-purple-800/40 pb-3">
-                          <div>
-                            <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
-                              {ret.returnReference}
-                            </span>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                              Reason: <strong className="capitalize">{ret.reason.replace(/_/g, " ")}</strong>
-                            </p>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                isPhysicalDone
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                  : isRejected
-                                  ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
-                                  : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
-                              }`}
-                            >
-                              Physical: {ret.status.replace(/_/g, " ")}
-                            </span>
-
-                            <span
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                isPaid
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                  : isDisputed
-                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                                  : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                              }`}
-                            >
-                              Refund: {(ret.refundStatus || "pending_review").replace(/_/g, " ")}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Physical Return Stepper */}
-                        <div className="space-y-2">
-                          <span className="font-bold text-[11px] text-slate-600 dark:text-slate-400 uppercase tracking-wider block">
-                            1. Physical Return Journey
-                          </span>
-                          <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
-                            <div className={`p-2 rounded-xl border ${physicalStep >= 1 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
-                              Requested
-                            </div>
-                            <div className={`p-2 rounded-xl border ${physicalStep >= 2 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
-                              Scheduled
-                            </div>
-                            <div className={`p-2 rounded-xl border ${physicalStep >= 3 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
-                              Received &bull; Studio
-                            </div>
-                            <div className={`p-2 rounded-xl border ${physicalStep >= 4 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
-                              Inspected
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Courier / Logistics Details */}
-                        {ret.courierName && (
-                          <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] space-y-1">
-                            <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <Truck className="w-3.5 h-3.5 text-purple-600" /> Pickup Logistics Partner: {ret.courierName}
-                            </p>
-                            {ret.trackingNumber && (
-                              <p className="font-mono text-slate-600 dark:text-slate-300">
-                                AWB Tracking Ref: <strong>{ret.trackingNumber}</strong>
-                              </p>
-                            )}
-                            {ret.trackingUrl && (
-                              <a
-                                href={ret.trackingUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-purple-600 hover:underline font-bold inline-flex items-center gap-1"
-                              >
-                                Track Pickup Live <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Customer Instructions from Studio */}
-                        {ret.customerInstructions && (
-                          <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-[11px]">
-                            <strong>Studio Instructions:</strong> {ret.customerInstructions}
-                          </div>
-                        )}
-
-                        {/* Rejection Notice if rejected */}
-                        {ret.rejectionReason && (
-                          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-[11px]">
-                            <strong>Decline Reason:</strong> {ret.rejectionReason}
-                          </div>
-                        )}
-
-                        {/* Customer Refund Destination Preference */}
-                        {ret.refundDestination && (
-                          <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] space-y-1 text-slate-600 dark:text-slate-300">
-                            <span className="font-bold text-slate-900 dark:text-white block">
-                              Your Chosen Payout Destination:
-                            </span>
-                            {ret.refundDestination.upiId && (
-                              <p>UPI ID: <span className="font-mono font-bold text-purple-600">{ret.refundDestination.upiId}</span></p>
-                            )}
-                            {ret.refundDestination.accountNumber && (
-                              <p>
-                                Bank Transfer: {ret.refundDestination.bankName || "Bank"} (Account: <span className="font-mono">{ret.refundDestination.accountNumber}</span>)
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Verified Refund Settlement Card (Paid) */}
-                        {isPaid && (
-                          <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300">
-                                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                                Refund Disbursed &amp; Settled
-                              </span>
-                              <span className="font-black text-sm text-emerald-700 dark:text-emerald-300 font-mono">
-                                {formatINR(ret.refundAmount || order.totalAmount)}
-                              </span>
-                            </div>
-
-                            <p className="text-[11px]">
-                              Payout Reference: <strong className="font-mono">{ret.refundTransactionReference || "Verified Transfer"}</strong>
-                              {ret.refundDisbursedAt && ` • Disbursed on ${new Date(ret.refundDisbursedAt).toLocaleDateString("en-IN")}`}
-                            </p>
-
-                            <div className="flex flex-wrap items-center gap-3 pt-1">
-                              {ret.refundProofUrl && (
-                                <button
-                                  type="button"
-                                  onClick={() => setProofPreviewUrl(ret.refundProofUrl)}
-                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs"
-                                >
-                                  <Eye className="w-3.5 h-3.5" /> Inspect Payout Receipt
-                                </button>
-                              )}
-
-                              {!isDisputed && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setDisputingReturn(ret);
-                                    setDisputeModalOpen(true);
-                                  }}
-                                  className="px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 hover:bg-amber-100 text-[11px] font-semibold transition"
-                                >
-                                  Dispute Refund / Payment Not Received
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Disputed Alert Banner for Customer */}
-                        {isDisputed && (
-                          <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100 text-[11px] space-y-1">
-                            <p className="font-bold flex items-center gap-1.5">
-                              <AlertTriangle className="w-4 h-4 text-amber-600" /> Dispute Under Review by Studio Finance
-                            </p>
-                            <p>
-                              You reported: &ldquo;{ret.refundDisputeReason || "Payment discrepancy"}&rdquo;. Our manager will contact you with resolution details.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1776,7 +1881,7 @@ export default function OrderTrackingDetailPage() {
 
                   {refundMethodPreference === "cash" && (
                     <p className="text-[11px] text-purple-700 dark:text-purple-300">
-                      Cash refund will be handed over in person at Bishnu Studio counter upon physical item return and signed receipt voucher.
+                      Cash refund will be handed over in person at collection counter upon physical item return and signed receipt voucher.
                     </p>
                   )}
                 </div>
@@ -1853,7 +1958,7 @@ export default function OrderTrackingDetailPage() {
 
             <form onSubmit={handleDisputeRefund} className="space-y-4 text-xs">
               <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                If the refund has not reflected in your bank account, was disbursed for an incorrect amount, or was sent to an incorrect UPI ID, please describe the discrepancy below. Studio finance will re-check with our bank.
+                If the refund has not reflected in your bank account, was disbursed for an incorrect amount, or was sent to an incorrect UPI ID, please describe the discrepancy below. Finance team will re-check with our bank.
               </p>
 
               <div>
@@ -1907,7 +2012,7 @@ export default function OrderTrackingDetailPage() {
             </button>
             <div className="bg-slate-900 rounded-2xl overflow-hidden border border-slate-700">
               <div className="p-3 bg-slate-800 border-b border-slate-700 text-xs font-bold text-white flex items-center justify-between">
-                <span>Verified Studio Payout Receipt</span>
+                <span>Verified Payout Receipt</span>
                 <a
                   href={proofPreviewUrl}
                   target="_blank"

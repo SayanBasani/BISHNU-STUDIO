@@ -185,3 +185,125 @@ export function validateTrackingUrl(url: string | null | undefined): {
     };
   }
 }
+
+/**
+ * Categorizes an order based on its item specifications.
+ */
+export function determineOrderCategory(items: any[] = []): "retail" | "service" | "mixed" {
+  if (!items || items.length === 0) return "retail";
+
+  const serviceTypes = new Set(["pvc_card", "document_print", "lamination", "photo_print"]);
+  let hasService = false;
+  let hasRetail = false;
+
+  for (const item of items) {
+    const type = item.itemType || "";
+    if (serviceTypes.has(type)) {
+      hasService = true;
+    } else {
+      hasRetail = true;
+    }
+  }
+
+  if (hasService && hasRetail) return "mixed";
+  if (hasService) return "service";
+  return "retail";
+}
+
+export interface FulfillmentMilestone {
+  key: string;
+  title: string;
+  subtitle: string;
+  stepIndex: number;
+}
+
+/**
+ * Returns contextual fulfillment milestones depending on delivery method and product nature.
+ */
+export function getFulfillmentMilestones(options: {
+  deliveryType: string;
+  orderCategory?: "retail" | "service" | "mixed";
+  isService?: boolean;
+}): FulfillmentMilestone[] {
+  const isDelivery = options.deliveryType === "home_delivery" || options.deliveryType === "courier_delivery";
+  const isServiceOrder = options.isService ?? (options.orderCategory === "service" || options.orderCategory === "mixed");
+
+  if (isDelivery) {
+    if (isServiceOrder) {
+      return [
+        { key: "placed", title: "Order Placed", subtitle: "Files & specs submitted", stepIndex: 0 },
+        { key: "confirmed", title: "Confirmed & Approved", subtitle: "Specifications verified", stepIndex: 1 },
+        { key: "processing", title: "Production in Progress", subtitle: "Printing, finishing & packing", stepIndex: 2 },
+        { key: "out_for_delivery", title: "Dispatched / In Transit", subtitle: "Shipped via courier partner", stepIndex: 3 },
+        { key: "completed", title: "Delivered", subtitle: "Delivered to your doorstep", stepIndex: 4 },
+      ];
+    } else {
+      return [
+        { key: "placed", title: "Order Placed", subtitle: "Order reference registered", stepIndex: 0 },
+        { key: "confirmed", title: "Order Confirmed", subtitle: "Order & payment verified", stepIndex: 1 },
+        { key: "processing", title: "Preparing Your Order", subtitle: "Items picked & packed", stepIndex: 2 },
+        { key: "out_for_delivery", title: "Shipped / In Transit", subtitle: "Out with courier partner", stepIndex: 3 },
+        { key: "completed", title: "Delivered", subtitle: "Delivered to your doorstep", stepIndex: 4 },
+      ];
+    }
+  } else {
+    // Customer Collection / Store Pickup
+    if (isServiceOrder) {
+      return [
+        { key: "placed", title: "Order Placed", subtitle: "Files & specs submitted", stepIndex: 0 },
+        { key: "confirmed", title: "Confirmed & Approved", subtitle: "Specifications verified", stepIndex: 1 },
+        { key: "processing", title: "Production in Progress", subtitle: "Printing, finishing & packaging", stepIndex: 2 },
+        { key: "ready_for_collection", title: "Ready for Collection", subtitle: "Ready at collection counter", stepIndex: 3 },
+        { key: "completed", title: "Collected", subtitle: "Handed over to customer", stepIndex: 4 },
+      ];
+    } else {
+      return [
+        { key: "placed", title: "Order Placed", subtitle: "Order reference registered", stepIndex: 0 },
+        { key: "confirmed", title: "Order Confirmed", subtitle: "Order & payment verified", stepIndex: 1 },
+        { key: "processing", title: "Preparing Your Order", subtitle: "Items assembled & packed", stepIndex: 2 },
+        { key: "ready_for_collection", title: "Ready for Collection", subtitle: "Ready at collection counter", stepIndex: 3 },
+        { key: "completed", title: "Collected", subtitle: "Handed over to customer", stepIndex: 4 },
+      ];
+    }
+  }
+}
+
+/**
+ * Maps an order's status to its milestone step index (0 to 4).
+ */
+export function getActiveMilestoneIndex(orderStatus: string, deliveryType: string, isPaid = false): number {
+  if (orderStatus === "completed") return 4;
+  if (orderStatus === "out_for_delivery" || orderStatus === "ready_for_collection") return 3;
+  if (orderStatus === "processing") return 2;
+  if (orderStatus === "confirmed") return 1;
+  return isPaid ? 1 : 0;
+}
+
+/**
+ * Returns human-friendly customer-facing label for internal status.
+ */
+export function getCustomerFulfillmentLabel(
+  status: string,
+  deliveryType: string,
+  isService = false
+): string {
+  const isDelivery = deliveryType === "home_delivery" || deliveryType === "courier_delivery";
+  switch (status) {
+    case "pending":
+      return "Order Placed";
+    case "confirmed":
+      return "Order Confirmed";
+    case "processing":
+      return isService ? "Production in Progress" : "Preparing Your Order";
+    case "ready_for_collection":
+      return isDelivery ? "Ready for Dispatch" : "Ready for Collection";
+    case "out_for_delivery":
+      return isDelivery ? "Shipped / Out for Delivery" : "Ready for Collection";
+    case "completed":
+      return isDelivery ? "Delivered" : "Collected";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return status.replace(/_/g, " ");
+  }
+}

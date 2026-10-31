@@ -67,6 +67,12 @@ export default function AdminReturnDetailPage() {
   const [restockInventory, setRestockInventory] = useState(false);
   const [allowAdminOverride, setAllowAdminOverride] = useState(false);
 
+  // Exchange state
+  const [replacementOrderId, setReplacementOrderId] = useState("");
+  const [exchangeStatus, setExchangeStatus] = useState("requested");
+  const [exchangePriceDifference, setExchangePriceDifference] = useState(0);
+  const [exchangeNotes, setExchangeNotes] = useState("");
+
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -107,6 +113,10 @@ export default function AdminReturnDetailPage() {
       setRefundMethod(ret.refundMethod || "upi");
       setRefundTransactionReference(ret.refundTransactionReference || "");
       setRefundProofUrl(ret.refundProofUrl || "");
+      setReplacementOrderId(ret.replacementOrderId || "");
+      setExchangeStatus(ret.exchangeStatus || "requested");
+      setExchangePriceDifference(ret.exchangePriceDifference || 0);
+      setExchangeNotes(ret.exchangeNotes || "");
       setRestockInventory(false);
     } catch (err: any) {
       setError(err?.message || "Error loading return");
@@ -129,6 +139,12 @@ export default function AdminReturnDetailPage() {
 
     if (refundStatus === "paid" && !refundTransactionReference.trim()) {
       setFormError("A verified payout transaction reference (UTR, UPI reference, or Cash voucher number) is required when marking refund as Paid.");
+      setSaving(false);
+      return;
+    }
+
+    if (refundStatus === "paid" && !refundProofUrl.trim() && !allowAdminOverride) {
+      setFormError("A verified payout proof URL or signed receipt image is required when marking refund as Paid.");
       setSaving(false);
       return;
     }
@@ -156,6 +172,10 @@ export default function AdminReturnDetailPage() {
           refundMethod: refundMethod || null,
           refundTransactionReference: refundTransactionReference.trim() || null,
           refundProofUrl: refundProofUrl.trim() || null,
+          replacementOrderId: replacementOrderId.trim() || null,
+          exchangeStatus: exchangeStatus || null,
+          exchangePriceDifference: Number(exchangePriceDifference) || 0,
+          exchangeNotes: exchangeNotes.trim() || null,
           restockInventory,
           allowAdminOverride,
         }),
@@ -201,19 +221,19 @@ export default function AdminReturnDetailPage() {
     );
   }
 
-  // All possible physical statuses for display/override
+  // All possible physical statuses for display/override (generalized terminology)
   const allPhysicalStatuses = [
     { value: "requested", label: "Requested (Customer Initial Request)" },
-    { value: "under_review", label: "Under Review by Studio Staff" },
+    { value: "under_review", label: "Under Review" },
     { value: "approved", label: "Approved (Ready for Pickup / Dropoff)" },
     { value: "pickup_scheduled", label: "Pickup Scheduled with Courier" },
     { value: "picked_up", label: "Items Picked Up by Courier" },
     { value: "counter_dropoff", label: "Items Dropped Off at Counter" },
-    { value: "in_transit", label: "In Transit to Studio" },
-    { value: "received_at_studio", label: "Received at Studio" },
+    { value: "in_transit", label: "In Transit" },
+    { value: "received_at_studio", label: "Received at Return Location" },
     { value: "inspection_in_progress", label: "Inspection in Progress" },
     { value: "inspection_passed", label: "Inspection Passed (Condition Verified)" },
-    { value: "inspection_failed", label: "Inspection Failed (Customer Damage)" },
+    { value: "inspection_failed", label: "Inspection Failed (Item Damaged)" },
     { value: "return_completed", label: "Return Completed & Archived" },
     { value: "rejected", label: "Rejected (Requires Reason)" },
     { value: "cancelled", label: "Cancelled" },
@@ -227,14 +247,15 @@ export default function AdminReturnDetailPage() {
         (opt) => opt.value === returnRecord.status || allowedPhysicalTransitions.includes(opt.value)
       );
 
-  // All possible refund settlement statuses
+  // All possible refund settlement statuses - 'paid' is strictly executed via Record Refund Payment action
   const allRefundStatuses = [
     { value: "pending_review", label: "Pending Review (Awaiting Inspection)" },
-    { value: "approved", label: "Approved for Disbursement" },
-    { value: "pending_payout", label: "Pending Payout Execution" },
+    { value: "approved", label: "Approved (Awaiting Payout Execution)" },
+    { value: "awaiting_payout", label: "Awaiting Payout Execution" },
+    { value: "pending_payout", label: "Awaiting Payout Execution" },
     { value: "payout_initiated", label: "Payout Initiated via Bank/UPI" },
-    { value: "paid", label: "Paid & Settled (Verified UTR/Receipt)" },
-    { value: "not_eligible", label: "Not Eligible (Inspection Failed / Declined)" },
+    ...(allowAdminOverride ? [{ value: "paid", label: "Paid & Settled (Administrative Override)" }] : []),
+    { value: "not_eligible", label: "Not Eligible (Declined / Failed Condition)" },
     { value: "disputed", label: "Disputed by Customer" },
     { value: "failed", label: "Payout Transfer Failed" },
     { value: "cancelled", label: "Refund Cancelled" },
@@ -564,7 +585,7 @@ export default function AdminReturnDetailPage() {
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. DTDC, Delhivery, Studio Associate"
+                    placeholder="e.g. DTDC, Delhivery, Staff Associate"
                     value={courierName}
                     onChange={(e) => setCourierName(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
@@ -749,7 +770,7 @@ export default function AdminReturnDetailPage() {
                     className="w-full px-3 py-2 rounded-lg border border-purple-300 dark:border-purple-700 bg-white dark:bg-slate-800 font-mono text-slate-900 dark:text-white text-xs"
                   />
                   <p className="text-[10px] text-purple-700 dark:text-purple-400 mt-1">
-                    Must be unique. Deduplicated across all studio transactions to guarantee idempotency.
+                    Must be unique. Deduplicated across all system transactions to guarantee idempotency.
                   </p>
                 </div>
 
@@ -778,6 +799,82 @@ export default function AdminReturnDetailPage() {
                 </div>
               </div>
             </div>
+
+            {/* WORKFLOW 2.5: Exchange & Replacement Logistics */}
+            {returnRecord.requestedResolution === "exchange" && (
+              <div className="p-4 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+                    <RotateCcw className="w-4 h-4" />
+                    Exchange &amp; Replacement Item Workflow
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 uppercase">
+                    {exchangeStatus}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Exchange Stage *
+                    </label>
+                    <select
+                      value={exchangeStatus}
+                      onChange={(e) => setExchangeStatus(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-800 font-semibold text-slate-900 dark:text-white text-xs"
+                    >
+                      <option value="requested">Exchange Requested</option>
+                      <option value="under_review">Under Review</option>
+                      <option value="approved">Exchange Approved</option>
+                      <option value="replacement_created">Replacement Order Created</option>
+                      <option value="dispatched">Replacement Dispatched</option>
+                      <option value="completed">Exchange Completed</option>
+                      <option value="rejected">Exchange Declined</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Replacement Order ID / Reference
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. ord_xxx or EXC-202610-01"
+                      value={replacementOrderId}
+                      onChange={(e) => setReplacementOrderId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-800 font-mono text-slate-900 dark:text-white text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Price Difference Adjustment (₹)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={exchangePriceDifference}
+                      onChange={(e) => setExchangePriceDifference(parseFloat(e.target.value) || 0)}
+                      className="w-full px-3 py-2 rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Exchange Notes
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Swapped for Size L Navy Blue"
+                      value={exchangeNotes}
+                      onChange={(e) => setExchangeNotes(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Inventory Restocking Control */}
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
@@ -831,7 +928,7 @@ export default function AdminReturnDetailPage() {
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. Verified with studio supervisor, refund approved via bank transfer..."
+                  placeholder="e.g. Verified with supervisor, refund approved via bank transfer..."
                   value={internalNotes}
                   onChange={(e) => setInternalNotes(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"

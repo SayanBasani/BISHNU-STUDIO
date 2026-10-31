@@ -107,7 +107,9 @@ export const REFUND_STATUSES = [
   "not_eligible",
   "pending_review",
   "approved",
+  "awaiting_payout",
   "pending_payout",
+  "payout_recorded",
   "payout_initiated",
   "paid",
   "failed",
@@ -121,13 +123,86 @@ export type RefundStatus = typeof REFUND_STATUSES[number];
 export const VALID_REFUND_TRANSITIONS: Record<RefundStatus, RefundStatus[]> = {
   not_eligible: ["pending_review"],
   pending_review: ["approved", "not_eligible", "cancelled"],
-  approved: ["pending_payout", "cancelled"],
-  pending_payout: ["payout_initiated", "paid", "failed", "cancelled"],
+  approved: ["awaiting_payout", "pending_payout", "payout_recorded", "payout_initiated", "cancelled"],
+  awaiting_payout: ["payout_recorded", "payout_initiated", "paid", "failed", "cancelled"],
+  pending_payout: ["payout_recorded", "payout_initiated", "paid", "failed", "cancelled"],
+  payout_recorded: ["paid", "failed", "disputed"],
   payout_initiated: ["paid", "failed", "disputed"],
   paid: ["disputed"], // Guard: Once paid, can only transition to disputed if customer raises issue
-  failed: ["pending_payout", "cancelled"],
-  disputed: ["pending_review", "pending_payout", "paid", "cancelled"],
+  failed: ["awaiting_payout", "pending_payout", "cancelled"],
+  disputed: ["pending_review", "awaiting_payout", "pending_payout", "paid", "cancelled"],
   cancelled: [], // Terminal
+};
+
+// 3. Exchange & Replacement Workflow Statuses
+export const EXCHANGE_STATUSES = [
+  "requested",
+  "under_review",
+  "approved",
+  "replacement_created",
+  "dispatched",
+  "completed",
+  "rejected",
+  "cancelled",
+] as const;
+
+export type ExchangeStatus = typeof EXCHANGE_STATUSES[number];
+
+export const VALID_EXCHANGE_TRANSITIONS: Record<ExchangeStatus, ExchangeStatus[]> = {
+  requested: ["under_review", "approved", "rejected", "cancelled"],
+  under_review: ["approved", "rejected", "cancelled"],
+  approved: ["replacement_created", "rejected", "cancelled"],
+  replacement_created: ["dispatched", "completed", "cancelled"],
+  dispatched: ["completed", "cancelled"],
+  completed: [], // Terminal
+  rejected: [], // Terminal
+  cancelled: [], // Terminal
+};
+
+// Human-friendly operational labels (generalized, zero hardcoded studio terms)
+export const PHYSICAL_STATUS_LABELS: Record<string, string> = {
+  requested: "Return Requested",
+  under_review: "Under Review",
+  approved: "Return Approved",
+  pickup_scheduled: "Pickup Scheduled",
+  pickup_failed: "Pickup Attempt Failed",
+  picked_up: "Picked Up by Courier",
+  counter_dropoff: "Dropped Off at Counter",
+  in_transit: "In Transit to Return Location",
+  received_at_studio: "Received at Return Location",
+  received: "Received at Return Location",
+  inspection_in_progress: "Quality Inspection in Progress",
+  inspection_passed: "Inspection Passed",
+  inspection_failed: "Inspection Failed",
+  return_completed: "Return Completed",
+  completed: "Return Completed",
+  rejected: "Return Rejected",
+  cancelled: "Return Cancelled",
+};
+
+export const REFUND_STATUS_LABELS: Record<string, string> = {
+  not_eligible: "Not Eligible",
+  pending_review: "Pending Review",
+  approved: "Approved for Disbursement",
+  awaiting_payout: "Awaiting Payout Execution",
+  pending_payout: "Awaiting Payout Execution",
+  payout_recorded: "Payout Initiated / In Progress",
+  payout_initiated: "Payout Initiated / In Progress",
+  paid: "Refund Paid & Settled",
+  failed: "Payout Transfer Failed",
+  disputed: "Disputed by Customer",
+  cancelled: "Refund Cancelled",
+};
+
+export const EXCHANGE_STATUS_LABELS: Record<string, string> = {
+  requested: "Exchange Requested",
+  under_review: "Under Review",
+  approved: "Exchange Approved",
+  replacement_created: "Replacement Order Created",
+  dispatched: "Replacement Dispatched",
+  completed: "Exchange Completed",
+  rejected: "Exchange Declined",
+  cancelled: "Exchange Cancelled",
 };
 
 /**

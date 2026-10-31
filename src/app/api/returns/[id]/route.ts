@@ -47,6 +47,28 @@ const updateReturnSchema = z.object({
   refundProofUrl: z.string().optional().nullable(),
   refundDestination: z.any().optional(),
   refundDisputeReason: z.string().optional().nullable(),
+  replacementOrderId: z.string().optional().nullable(),
+  exchangeStatus: z.enum([
+    "requested",
+    "under_review",
+    "approved",
+    "replacement_created",
+    "dispatched",
+    "completed",
+    "rejected",
+    "cancelled",
+  ] as unknown as [string, ...string[]]).optional(),
+  exchangePriceDifference: z.number().optional(),
+  exchangeNotes: z.string().optional().nullable(),
+  action: z.enum([
+    "update",
+    "approve_refund",
+    "record_payout",
+    "reject_refund",
+    "approve_exchange",
+    "record_replacement_order",
+  ]).optional(),
+  payoutConfirmed: z.boolean().optional(),
   restockInventory: z.boolean().optional(),
   allowAdminOverride: z.boolean().optional(),
 });
@@ -268,6 +290,17 @@ export async function PATCH(
         );
       }
 
+      // Ensure payout proof URL or signed receipt is provided
+      const payoutProof = data.refundProofUrl?.trim() || existingReturn.refundProofUrl?.trim();
+      if (!payoutProof && !data.allowAdminOverride) {
+        return NextResponse.json(
+          {
+            error: "Valid payout proof (screenshot URL or signed voucher image) is mandatory before marking a refund as paid.",
+          },
+          { status: 400 }
+        );
+      }
+
       // Check transaction reference uniqueness across different returns
       const duplicateRef = await db
         .select({ id: orderReturns.id, returnReference: orderReturns.returnReference })
@@ -346,10 +379,27 @@ export async function PATCH(
       updates.refundTransactionReference = data.refundTransactionReference?.trim() || null;
     }
 
+    // Exchange tracking updates
+    if (data.replacementOrderId !== undefined) {
+      updates.replacementOrderId = data.replacementOrderId?.trim() || null;
+    }
+    if (data.exchangeStatus !== undefined) {
+      updates.exchangeStatus = data.exchangeStatus;
+    }
+    if (data.exchangePriceDifference !== undefined) {
+      updates.exchangePriceDifference = data.exchangePriceDifference;
+    }
+    if (data.exchangeNotes !== undefined) {
+      updates.exchangeNotes = data.exchangeNotes?.trim() || null;
+    }
+
     if (data.refundStatus === "paid" || data.status === "refund_processed") {
       updates.refundStatus = "paid";
       updates.refundProcessedAt = now;
       updates.refundDisbursedAt = now;
+      updates.refundDisbursedByUserId = auth.user.id;
+    } else if (data.refundStatus === "approved" || data.refundStatus === "awaiting_payout") {
+      updates.refundStatus = data.refundStatus;
       updates.refundDisbursedByUserId = auth.user.id;
     }
 
@@ -401,9 +451,9 @@ export async function PATCH(
       const carrier = data.courierName || existingReturn.courierName || "Pickup Associate";
       customerTimelineMsg = `Return #${existingReturn.returnReference} pickup scheduled with ${carrier}. Expected: ${data.expectedPickupDate || "Soon"}.`;
     } else if (data.status === "picked_up") {
-      customerTimelineMsg = `Return #${existingReturn.returnReference} items picked up by courier. En route to Bishnu Studio.`;
+      customerTimelineMsg = `Return #${existingReturn.returnReference} items picked up by courier. En route to return location.`;
     } else if (data.status === "received_at_studio" || data.status === "received") {
-      customerTimelineMsg = `Return #${existingReturn.returnReference} received at Bishnu Studio. Inspection will commence.`;
+      customerTimelineMsg = `Return #${existingReturn.returnReference} received at return location. Inspection will commence.`;
     } else if (data.inspectionResult === "passed") {
       customerTimelineMsg = `Return #${existingReturn.returnReference} items passed physical inspection. Eligible for refund settlement.`;
     } else if (data.inspectionResult === "failed") {
@@ -468,7 +518,7 @@ export async function PATCH(
           message: customerTimelineMsg,
           entityType: "return",
           entityId: id,
-          linkUrl: `/account/orders/${existingReturn.orderId}`,
+          linkUrl: `/account/orders/${existingReturn.orderId}#return-${id}`,
           priority: isPaidRefund || data.status === "approved" ? "high" : "normal",
           deduplicationKey: `notif_return_${id}_${nextStatus}_${nextRefundStatus}`,
         });

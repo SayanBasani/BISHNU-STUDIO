@@ -27,6 +27,46 @@ export interface CreateNotificationInput {
   deduplicationKey?: string | null;
 }
 
+export function resolveNotificationLink(input: {
+  recipientType: NotificationRecipientType;
+  entityType?: string | null;
+  entityId?: string | null;
+  linkUrl?: string | null;
+}): string | null {
+  const { recipientType, entityType, entityId, linkUrl } = input;
+
+  // 1. Return & Exchange notifications
+  if (entityType === "return" && entityId) {
+    if (recipientType === "admin") {
+      // Must ALWAYS open matching admin return detail page (/admin/returns/[returnId])
+      return `/admin/returns/${entityId}`;
+    }
+    // Customer return notifications open order detail with return anchor
+    if (linkUrl && linkUrl.startsWith("/account/orders/")) {
+      return linkUrl.includes("#return-") ? linkUrl : `${linkUrl}#return-${entityId}`;
+    }
+    return `/account/orders?returnId=${entityId}`;
+  }
+
+  // 2. Order notifications
+  if (entityType === "order" && entityId) {
+    if (recipientType === "admin") {
+      return `/admin/orders/${entityId}`;
+    }
+    return `/account/orders/${entityId}`;
+  }
+
+  // 3. Payment verification notifications
+  if (entityType === "payment" && entityId) {
+    if (recipientType === "admin") {
+      return `/admin/payments/reconciliation`;
+    }
+    return linkUrl || `/account/orders`;
+  }
+
+  return linkUrl || null;
+}
+
 export async function createNotification(input: CreateNotificationInput) {
   const now = Date.now();
 
@@ -44,6 +84,12 @@ export async function createNotification(input: CreateNotificationInput) {
   }
 
   const id = `notif_${crypto.randomUUID()}`;
+  const resolvedLink = resolveNotificationLink({
+    recipientType: input.recipientType,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    linkUrl: input.linkUrl,
+  });
 
   const newNotif = {
     id,
@@ -55,7 +101,7 @@ export async function createNotification(input: CreateNotificationInput) {
     message: input.message.trim(),
     entityType: input.entityType || "system",
     entityId: input.entityId || null,
-    linkUrl: input.linkUrl || null,
+    linkUrl: resolvedLink,
     isRead: false,
     readAt: null,
     priority: input.priority || "normal",

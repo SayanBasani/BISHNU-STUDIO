@@ -268,7 +268,7 @@ export async function POST(req: NextRequest) {
     // Dispatch persistent notifications
     try {
       const { createNotification } = await import("@/lib/notifications");
-      // Admin notification
+      // Admin notification: Opens matching admin return detail page (/admin/returns/[returnId])
       await createNotification({
         recipientType: "admin",
         category: "return",
@@ -277,7 +277,7 @@ export async function POST(req: NextRequest) {
         message: `Customer requested a return for Order #${order.orderReference} (${reason.replace(/_/g, " ")}). Est. refund: ₹${calculatedRefundAmount.toFixed(2)}.`,
         entityType: "return",
         entityId: returnId,
-        linkUrl: `/admin/orders/${orderId}`,
+        linkUrl: `/admin/returns/${returnId}`,
         priority: "high",
         deduplicationKey: `notif_admin_return_${returnId}`,
       });
@@ -292,7 +292,7 @@ export async function POST(req: NextRequest) {
         message: `Your return request #${returnReference} for Order #${order.orderReference} has been submitted and is under review.`,
         entityType: "return",
         entityId: returnId,
-        linkUrl: `/account/orders/${orderId}`,
+        linkUrl: `/account/orders/${orderId}#return-${returnId}`,
         deduplicationKey: `notif_cust_return_${returnId}`,
       });
     } catch (notifErr) {
@@ -301,7 +301,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: "Return request submitted successfully. Our studio team will review your request.",
+      message: "Return request submitted successfully. Our team will review your request.",
       returnReference,
       returnId,
     });

@@ -1201,17 +1201,17 @@ export default function AdminOrderDetailPage() {
               >
                 <option value="pending">Pending Review</option>
                 <option value="confirmed">Confirmed</option>
-                <option value="processing">Processing in Studio</option>
+                <option value="processing">Preparing Order / In Progress</option>
                 {isPickup ? (
                   <>
-                    <option value="ready_for_collection">Ready for Counter Pickup</option>
-                    <option value="completed">Collected & Completed</option>
+                    <option value="ready_for_collection">Ready for Collection (Ready for Counter Pickup)</option>
+                    <option value="completed">Collected (Collected & Completed)</option>
                   </>
                 ) : (
                   <>
-                    <option value="ready_for_collection">Packed & Ready for Dispatch</option>
-                    <option value="out_for_delivery">Dispatched / Out for Delivery</option>
-                    <option value="completed">Delivered & Completed</option>
+                    <option value="ready_for_collection">Ready for Dispatch (Packed & Ready for Dispatch)</option>
+                    <option value="out_for_delivery">Shipped (Dispatched / Out for Delivery)</option>
+                    <option value="completed">Delivered (Delivered & Completed)</option>
                   </>
                 )}
                 <option value="cancelled">Cancelled</option>
@@ -1360,7 +1360,7 @@ export default function AdminOrderDetailPage() {
               className="w-full px-3 py-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-purple-500"
             />
             <p className="text-[10px] text-purple-700 dark:text-purple-400">
-              Strictly private to studio admins. Never returned by customer APIs or notifications.
+              Strictly private to staff and administrators. Never returned by customer APIs or notifications.
             </p>
           </div>
 

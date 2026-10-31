@@ -119,8 +119,8 @@ export default function AdminReturnsPage() {
             <option value="under_review">Under Review</option>
             <option value="approved">Approved for Pickup</option>
             <option value="pickup_scheduled">Pickup Scheduled</option>
-            <option value="in_transit">In Transit to Studio</option>
-            <option value="received">Received at Studio</option>
+            <option value="in_transit">In Transit</option>
+            <option value="received">Received at Return Location</option>
             <option value="inspection_in_progress">Inspection in Progress</option>
             <option value="refund_pending">Refund Pending</option>
             <option value="refund_processed">Refund Processed</option>
