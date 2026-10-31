@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { formatINR } from "@/lib/utils";
 import {
   ShoppingBag,
@@ -28,7 +29,11 @@ interface ProductImage {
   sortOrder: number;
 }
 
-export default function AdminProductsPage() {
+function AdminProductsContent() {
+  const searchParams = useSearchParams();
+  const editIdParam = searchParams.get("edit") || searchParams.get("id");
+  const [hasProcessedInitialEdit, setHasProcessedInitialEdit] = useState(false);
+
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,6 +74,16 @@ export default function AdminProductsPage() {
         setCategories(data.categories);
         if (data.categories.length > 0 && !categoryId) {
           setCategoryId(data.categories[0].id);
+        }
+
+        if (editIdParam && !hasProcessedInitialEdit) {
+          setHasProcessedInitialEdit(true);
+          const target = (data.products || []).find((p: any) => p.id === editIdParam);
+          if (target) {
+            handleOpenEdit(target);
+          } else {
+            setError(`Product ID "${editIdParam}" not found in catalog (it may have been deleted or archived).`);
+          }
         }
       }
     } catch (e) {
@@ -695,5 +710,20 @@ export default function AdminProductsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminProductsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="py-24 text-center">
+          <Loader2 className="w-8 h-8 text-purple-600 animate-spin mx-auto" />
+          <p className="text-xs text-slate-400 mt-2 font-medium">Loading catalog products...</p>
+        </div>
+      }
+    >
+      <AdminProductsContent />
+    </Suspense>
   );
 }

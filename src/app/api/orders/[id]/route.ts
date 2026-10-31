@@ -193,8 +193,12 @@ export async function GET(
         let resolvedProductImage = configuration.productImageUrl || null;
         let isResolvedFromCatalog = false;
 
+        let catalogProductExists = false;
+        let currentCatalogStock: number | null = null;
+        let isAvailable = false;
+
         if (item.itemType === "product") {
-          if (!resolvedProductName && item.productId) {
+          if (item.productId) {
             const prodRows = await db
               .select()
               .from(products)
@@ -202,25 +206,43 @@ export async function GET(
               .limit(1);
 
             if (prodRows.length > 0) {
-              resolvedProductName = prodRows[0].name;
-              resolvedProductSku = prodRows[0].sku;
-              isResolvedFromCatalog = true;
+              catalogProductExists = true;
+              currentCatalogStock = prodRows[0].stockQuantity;
+              isAvailable = prodRows[0].isAvailable;
 
-              const imgRows = await db
-                .select({ imageUrl: productImages.imageUrl })
-                .from(productImages)
-                .where(eq(productImages.productId, item.productId))
-                .limit(1);
-              if (imgRows.length > 0) {
-                resolvedProductImage = imgRows[0].imageUrl;
+              if (!resolvedProductName) {
+                resolvedProductName = prodRows[0].name;
+                resolvedProductSku = prodRows[0].sku;
+                isResolvedFromCatalog = true;
+              }
+              if (!resolvedProductSku && prodRows[0].sku) {
+                resolvedProductSku = prodRows[0].sku;
+              }
+
+              if (!resolvedProductImage) {
+                const imgRows = await db
+                  .select({ imageUrl: productImages.imageUrl })
+                  .from(productImages)
+                  .where(eq(productImages.productId, item.productId))
+                  .limit(1);
+                if (imgRows.length > 0) {
+                  resolvedProductImage = imgRows[0].imageUrl;
+                }
               }
             } else {
-              resolvedProductName = "Product details unavailable (historical item)";
+              if (!resolvedProductName) {
+                resolvedProductName = "Product details unavailable (historical item)";
+              }
             }
           } else if (!resolvedProductName) {
             resolvedProductName = "Product details unavailable (historical item)";
           }
         }
+
+        const stockDeductionStatus =
+          item.itemType !== "product"
+            ? "not_tracked"
+            : configuration.stockDeductionStatus || "deducted_at_checkout";
 
         return {
           ...item,
@@ -228,6 +250,9 @@ export async function GET(
           productSku: resolvedProductSku,
           productImage: resolvedProductImage,
           isResolvedFromCatalog,
+          catalogProductExists,
+          currentCatalogStock,
+          stockDeductionStatus,
           configuration,
           userReview: item.productId ? reviewByProductId.get(item.productId) || null : null,
           files: files
@@ -470,69 +495,9 @@ export async function PATCH(
       db.update(orders).set(updates).where(eq(orders.id, id))
     );
 
-    // If order is updated to 'paid', automatically reconcile pending payment submissions
-    if (paymentStatus === "paid") {
-      const pendingSubmissions = await db
-        .select()
-        .from(paymentSubmissions)
-        .where(
-          and(
-            eq(paymentSubmissions.orderId, id),
-            or(
-              eq(paymentSubmissions.status, "pending_verification"),
-              eq(paymentSubmissions.status, "review_required")
-            )
-          )
-        );
-
-      if (pendingSubmissions.length > 0) {
-        const now = Date.now();
-        for (const sub of pendingSubmissions) {
-          await db
-            .update(paymentSubmissions)
-            .set({
-              status: "verified",
-              verifiedByAdminId: auth.user.id,
-              verifiedAt: now,
-              verificationNote: "Automatically reconciled: Order marked paid by administrator.",
-              updatedAt: now,
-            })
-            .where(eq(paymentSubmissions.id, sub.id));
-
-          // Ensure master payments table has corresponding record
-          const existingPay = await db
-            .select()
-            .from(payments)
-            .where(eq(payments.transactionReference, sub.transactionId))
-            .limit(1);
-
-          if (existingPay.length === 0) {
-            await db.insert(payments).values({
-              id: `pay_${crypto.randomUUID()}`,
-              orderId: id,
-              paymentProvider: "upi",
-              transactionReference: sub.transactionId,
-              amount: sub.amount,
-              amountVerified: sub.amount,
-              currency: "INR",
-              status: "successful",
-              receivingAccountId: sub.receivingAccountId || null,
-              receivingUpiIdSnapshot: sub.receivingUpiIdSnapshot || sub.upiIdUsed,
-              receivingAccountNameSnapshot: sub.receivingAccountNameSnapshot || null,
-              verifiedByAdminId: auth.user.id,
-              verifiedAt: now,
-              paymentMetadataJson: JSON.stringify({
-                submissionId: sub.id,
-                verifiedByAdminId: auth.user.id,
-                verifiedAt: now,
-                autoReconciled: true,
-              }),
-              createdAt: now,
-            });
-          }
-        }
-      }
-    }
+    // Note (BS-ORDERS-04B audit): Manual update of order.paymentStatus (e.g. to 'paid' for cash-on-collection
+    // or administrative adjustments) must NOT automatically mark pending payment claims as verified.
+    // Payment claims must only be verified authoritatively via POST /api/admin/payments/[id]/verify.
 
     // Determine customer timeline message based on order lifecycle and delivery type
     let customerMsg = customerFulfillmentNote?.trim() || `Order status updated to ${

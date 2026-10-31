@@ -36,6 +36,7 @@ import {
   X,
   ShieldCheck,
   RefreshCw,
+  Boxes,
 } from "lucide-react";
 
 export default function AdminOrderDetailPage() {
@@ -75,6 +76,64 @@ export default function AdminOrderDetailPage() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [subActionError, setSubActionError] = useState<string | null>(null);
   const [subActionSuccess, setSubActionSuccess] = useState<string | null>(null);
+
+  // SKU Copy & Safe Inventory Modal states
+  const [copiedSku, setCopiedSku] = useState<string | null>(null);
+  const [inventoryModalItem, setInventoryModalItem] = useState<any | null>(null);
+  const [inventoryModalLoading, setInventoryModalLoading] = useState(false);
+  const [inventoryModalData, setInventoryModalData] = useState<any | null>(null);
+  const [inventoryDeducting, setInventoryDeducting] = useState(false);
+  const [inventoryModalError, setInventoryModalError] = useState<string | null>(null);
+
+  const copySkuToClipboard = (skuText: string) => {
+    if (!skuText) return;
+    navigator.clipboard.writeText(skuText.trim());
+    setCopiedSku(skuText.trim());
+    setTimeout(() => setCopiedSku(null), 2000);
+  };
+
+  const handleOpenDeductModal = async (item: any) => {
+    setInventoryModalItem(item);
+    setInventoryModalLoading(true);
+    setInventoryModalError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}/items/${item.id}/inventory`);
+      const data = await res.json();
+      if (data.success) {
+        setInventoryModalData(data.item);
+      } else {
+        setInventoryModalError(data.error || "Failed to fetch live inventory.");
+      }
+    } catch (e: any) {
+      setInventoryModalError(e.message || "Network error loading inventory.");
+    } finally {
+      setInventoryModalLoading(false);
+    }
+  };
+
+  const handleConfirmDeductStock = async () => {
+    if (!inventoryModalItem) return;
+    setInventoryDeducting(true);
+    setInventoryModalError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}/items/${inventoryModalItem.id}/deduct-stock`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSaveSuccess(data.message || "Stock deducted successfully.");
+        setInventoryModalItem(null);
+        setInventoryModalData(null);
+        await fetchOrderDetail();
+      } else {
+        setInventoryModalError(data.error || "Failed to deduct inventory.");
+      }
+    } catch (e: any) {
+      setInventoryModalError(e.message || "Network error while deducting stock.");
+    } finally {
+      setInventoryDeducting(false);
+    }
+  };
 
   useEffect(() => {
     if (orderId) fetchOrderDetail();
@@ -632,6 +691,10 @@ export default function AdminOrderDetailPage() {
 
             const itemThumb = item.productImage || config.productImageUrl;
             const itemSku = item.productSku || config.productSku;
+            const isCatalogLinked =
+              item.itemType === "product" &&
+              item.productId &&
+              item.catalogProductExists !== false;
 
             return (
               <div
@@ -641,29 +704,82 @@ export default function AdminOrderDetailPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-700 pb-2.5">
                   <div className="flex items-center gap-3">
                     {itemThumb && (
-                      <div className="w-12 h-12 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shrink-0">
-                        <img
-                          src={itemThumb}
-                          alt={itemTitle}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
+                      isCatalogLinked ? (
+                        <Link
+                          href={`/admin/products?edit=${item.productId}`}
+                          className="w-12 h-12 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shrink-0 hover:ring-2 hover:ring-purple-500 transition block group"
+                          title="View product in catalog"
+                        >
+                          <img
+                            src={itemThumb}
+                            alt={itemTitle}
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                          />
+                        </Link>
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shrink-0">
+                          <img
+                            src={itemThumb}
+                            alt={itemTitle}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )
                     )}
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-extrabold text-slate-900 dark:text-white text-sm">
-                          {idx + 1}. {itemTitle}
-                        </span>
+                        {isCatalogLinked ? (
+                          <Link
+                            href={`/admin/products?edit=${item.productId}`}
+                            className="font-extrabold text-slate-900 dark:text-white text-sm hover:text-purple-600 dark:hover:text-purple-400 transition inline-flex items-center gap-1 group"
+                            title="Edit product in catalog"
+                          >
+                            <span className="group-hover:underline">
+                              {idx + 1}. {itemTitle}
+                            </span>
+                            <ExternalLink className="w-3.5 h-3.5 text-purple-500 opacity-70 group-hover:opacity-100 transition shrink-0" />
+                          </Link>
+                        ) : (
+                          <span className="font-extrabold text-slate-900 dark:text-white text-sm">
+                            {idx + 1}. {itemTitle}
+                          </span>
+                        )}
+
+                        {item.itemType === "product" && item.catalogProductExists === false && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            Catalog Item Unavailable
+                          </span>
+                        )}
+
                         {item.isResolvedFromCatalog && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                             Catalog Item
                           </span>
                         )}
+
                         {itemSku && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                            SKU: {itemSku}
-                          </span>
+                          <div className="inline-flex items-center gap-1">
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                              SKU: {itemSku}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => copySkuToClipboard(itemSku)}
+                              title="Copy SKU"
+                              aria-label="Copy SKU"
+                              className="p-1 rounded text-slate-400 hover:text-purple-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                            >
+                              {copiedSku === itemSku ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 font-bold">
+                                  <Check className="w-3 h-3 text-emerald-600" /> Copied
+                                </span>
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
                         )}
+
                         <span className="text-xs font-semibold px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300">
                           Qty: {item.quantity}
                         </span>
@@ -751,6 +867,64 @@ export default function AdminOrderDetailPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Safe Inventory Controls & Status */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-200/70 dark:border-slate-700/70">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <Boxes className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" /> Stock Status:
+                    </span>
+
+                    {item.itemType !== "product" ? (
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                        Not tracked (Print Service)
+                      </span>
+                    ) : item.stockDeductionStatus === "deducted" || item.stockDeductionStatus === "deducted_at_checkout" ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        <Check className="w-3 h-3 text-emerald-600" /> Stock Deducted
+                        {item.stockDeductionStatus === "deducted_at_checkout" ? " (Checkout)" : " (Manual)"}
+                      </span>
+                    ) : item.catalogProductExists === false ? (
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                        Unavailable in Catalog
+                      </span>
+                    ) : (
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        Not Deducted
+                      </span>
+                    )}
+
+                    {item.itemType === "product" && item.currentCatalogStock !== null && (
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                        (Catalog Stock: <strong>{item.currentCatalogStock}</strong>)
+                      </span>
+                    )}
+                  </div>
+
+                  {item.itemType === "product" && item.catalogProductExists !== false && (
+                    <div>
+                      {item.stockDeductionStatus === "deducted" || item.stockDeductionStatus === "deducted_at_checkout" ? (
+                        <span className="text-[10px] text-slate-400 font-medium italic">
+                          Verified • No double-deduction
+                        </span>
+                      ) : item.currentCatalogStock !== null && item.currentCatalogStock < item.quantity ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                          <AlertCircle className="w-3.5 h-3.5" /> Insufficient Stock
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDeductModal(item)}
+                          title="Deduct ordered quantity from stock"
+                          aria-label="Deduct ordered quantity from stock"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition shadow-2xs"
+                        >
+                          <Boxes className="w-3.5 h-3.5" /> Deduct Stock
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -1285,6 +1459,132 @@ export default function AdminOrderDetailPage() {
                 alt="Payment Proof"
                 className="max-h-[75vh] object-contain w-auto"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Dialog / Modal for Safe Stock Deduction */}
+      {inventoryModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950/60 flex items-center justify-center text-purple-600 shrink-0">
+                  <Boxes className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Deduct {inventoryModalItem.quantity} unit{inventoryModalItem.quantity > 1 ? "s" : ""} from stock?
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Authoritative real-time inventory adjustment
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setInventoryModalItem(null);
+                  setInventoryModalData(null);
+                  setInventoryModalError(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                aria-label="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {inventoryModalLoading ? (
+              <div className="py-8 text-center space-y-2">
+                <Loader2 className="w-6 h-6 text-purple-600 animate-spin mx-auto" />
+                <p className="text-xs text-slate-400">Querying authoritative stock from server...</p>
+              </div>
+            ) : inventoryModalData ? (
+              <div className="space-y-3 text-xs">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-1">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Product</span>
+                    <span className="font-bold text-slate-900 dark:text-white text-sm">
+                      {inventoryModalData.productName}
+                    </span>
+                  </div>
+                  {inventoryModalData.sku && (
+                    <div>
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">SKU</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {inventoryModalData.sku}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase block">Current Stock</span>
+                    <span className="text-base font-black text-slate-800 dark:text-slate-200 font-mono">
+                      {inventoryModalData.currentStock}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800">
+                    <span className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold uppercase block">Ordered Qty</span>
+                    <span className="text-base font-black text-purple-700 dark:text-purple-300 font-mono">
+                      -{inventoryModalData.orderedQuantity}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase block">After Deduction</span>
+                    <span className="text-base font-black text-slate-800 dark:text-slate-200 font-mono">
+                      {inventoryModalData.expectedStockAfterDeduction}
+                    </span>
+                  </div>
+                </div>
+
+                {inventoryModalData.alreadyDeducted && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs">
+                    ⚠️ <strong>Notice:</strong> Stock for this item was already deducted. Double deduction is prevented.
+                  </div>
+                )}
+
+                {!inventoryModalData.hasSufficientStock && !inventoryModalData.alreadyDeducted && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-semibold">
+                    ❌ Insufficient stock available in inventory.
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {inventoryModalError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-semibold">
+                {inventoryModalError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setInventoryModalItem(null);
+                  setInventoryModalData(null);
+                  setInventoryModalError(null);
+                }}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  inventoryModalLoading ||
+                  inventoryDeducting ||
+                  !inventoryModalData?.canDeduct
+                }
+                onClick={handleConfirmDeductStock}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+              >
+                {inventoryDeducting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Confirm Deduction
+              </button>
             </div>
           </div>
         </div>

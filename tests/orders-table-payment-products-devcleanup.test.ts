@@ -3,33 +3,35 @@ import fs from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 
-describe("BS-ORDERS-04A: Workstream 1 - Admin All Orders Table Layout & Responsiveness", () => {
+describe("BS-ORDERS-04A & BS-ORDERS-04B: Admin All Orders Table Layout & Responsiveness", () => {
   const ordersPageSource = fs.readFileSync(
     path.resolve(process.cwd(), "src/app/admin/orders/page.tsx"),
     "utf-8"
   );
 
-  it("should enforce a minimum table width of at least 1150px to prevent cramped columns", () => {
-    expect(ordersPageSource).toMatch(/min-w-\[(1150|1200)px\]/);
+  it("should contain all 11 columns including sequential row numbering and eye-icon action", () => {
+    expect(ordersPageSource).toContain("<th className=\"py-3 px-2 w-10 text-center\">#</th>");
+    expect(ordersPageSource).toContain("Order Ref");
+    expect(ordersPageSource).toContain("Date & Time");
+    expect(ordersPageSource).toContain("Customer");
+    expect(ordersPageSource).toContain("Fulfillment");
+    expect(ordersPageSource).toContain("Items");
+    expect(ordersPageSource).toContain("Total");
+    expect(ordersPageSource).toContain("Payment Method");
+    expect(ordersPageSource).toContain("Payment Status");
+    expect(ordersPageSource).toContain("Order Status");
+    expect(ordersPageSource).toContain("Actions");
   });
 
-  it("should enforce whitespace-nowrap and explicit min-widths on table columns", () => {
-    expect(ordersPageSource).toContain("min-w-[170px] whitespace-nowrap"); // Order Ref
-    expect(ordersPageSource).toContain("min-w-[140px] whitespace-nowrap"); // Date & Time
-    expect(ordersPageSource).toContain("min-w-[170px]"); // Customer
-    expect(ordersPageSource).toContain("min-w-[150px]"); // Fulfillment
-    expect(ordersPageSource).toContain("min-w-[80px] text-center"); // Items
-    expect(ordersPageSource).toContain("min-w-[110px] font-mono whitespace-nowrap"); // Total
-    expect(ordersPageSource).toContain("min-w-[150px] whitespace-nowrap"); // Payment Method
-    expect(ordersPageSource).toContain("min-w-[140px] whitespace-nowrap"); // Payment Status
-    expect(ordersPageSource).toContain("min-w-[140px] whitespace-nowrap"); // Order Status
+  it("should fit desktop viewport widths cleanly without forcing arbitrary min-w-1200px", () => {
+    // BS-ORDERS-04B eliminates min-w-[1200px] to fit within ~1050px desktop content width
+    expect(ordersPageSource).not.toMatch(/min-w-\[(1150|1200)px\]/);
+    expect(ordersPageSource).toContain("overflow-x-auto");
   });
 
-  it("should implement sticky right positioning on the Actions column with opaque theme-aware backdrop", () => {
-    expect(ordersPageSource).toContain("sticky right-0");
-    expect(ordersPageSource).toContain("bg-white/95 dark:bg-slate-900/95");
-    expect(ordersPageSource).toContain("shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.08)]");
-    expect(ordersPageSource).toContain("dark:shadow-[-6px_0_12px_-4px_rgba(0,0,0,0.5)]");
+  it("should implement compact eye icon button with accessible tooltip and aria-label", () => {
+    expect(ordersPageSource).toContain('title="View Details"');
+    expect(ordersPageSource).toContain('aria-label="View Order Details"');
   });
 
   it("should retain mobile cards grid for screens below lg breakpoint", () => {
@@ -51,15 +53,13 @@ describe("BS-ORDERS-04A: Workstream 2 - Payment Status Reconciliation & Consiste
     "utf-8"
   );
 
-  it("should automatically reconcile pending payment submissions when order payment status is set to paid", () => {
-    expect(orderApiSource).toContain('if (paymentStatus === "paid") {');
-    expect(orderApiSource).toContain("eq(paymentSubmissions.status, \"pending_verification\")");
-    expect(orderApiSource).toContain('status: "verified"');
-    expect(orderApiSource).toContain("Automatically reconciled: Order marked paid by administrator.");
+  it("should NOT automatically reconcile pending payment submissions when order payment status is set to paid (BS-ORDERS-04B Audit)", () => {
+    // Payment claims must only be verified authoritatively via POST /api/admin/payments/[id]/verify
+    expect(orderApiSource).not.toContain("Automatically reconciled: Order marked paid by administrator.");
+    expect(orderApiSource).toContain("BS-ORDERS-04B audit");
   });
 
-  it("should avoid double-counting or concurrency issues when reconciling payments", () => {
-    expect(orderApiSource).toContain("eq(payments.transactionReference, sub.transactionId)");
+  it("should avoid double-counting or concurrency issues when verifying payments in authoritative verification API", () => {
     expect(verifyApiSource).toContain("existingPay.length === 0");
   });
 

@@ -80,3 +80,53 @@ export function getPaymentMethodBadgeClass(method?: string | null): string {
   }
 }
 
+export function formatCompactDateTime(
+  timestamp: number | Date | string | null | undefined
+): string {
+  if (!timestamp) return "N/A";
+  const date =
+    typeof timestamp === "number" || typeof timestamp === "string"
+      ? new Date(timestamp)
+      : timestamp;
+  if (isNaN(date.getTime())) return "N/A";
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const formattedHours = String(hours).padStart(2, "0");
+
+  return `${day}/${month}/${year}, ${formattedHours}:${minutes} ${ampm}`;
+}
+
+export function formatCompactPaymentMethod(method?: string | null): string {
+  if (!method || typeof method !== "string" || method.trim() === "") {
+    return "Not recorded";
+  }
+  const normalized = method.toLowerCase().trim();
+  switch (normalized) {
+    case "cash_on_collection":
+      return "Cash";
+    case "cash_on_delivery":
+    case "cod":
+      return "COD";
+    case "upi_mock":
+    case "upi":
+      return "UPI";
+    case "online":
+    case "card":
+      return "Online";
+    default:
+      return normalized
+        .split(/[_\s]+/)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+  }
+}
+
+

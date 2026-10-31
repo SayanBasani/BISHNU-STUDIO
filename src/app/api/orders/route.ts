@@ -19,7 +19,7 @@ import { generateOrderReference } from "@/lib/utils";
 import { logAuditEvent } from "@/lib/audit";
 import { recordOrderEvent } from "@/lib/order-timeline";
 import { getShopSettings } from "@/lib/settings";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import { createRequestTimer } from "@/lib/perf";
@@ -254,8 +254,13 @@ export async function POST(req: NextRequest) {
               productName: snapshottedProduct.name,
               productSku: snapshottedProduct.sku || undefined,
               productImageUrl: snapshottedProduct.imageUrl || undefined,
+              stockDeductionStatus: "deducted_at_checkout",
+              stockDeductedAt: Date.now(),
+              stockDeductedQuantity: item.quantity,
             }
-          : {}),
+          : {
+              stockDeductionStatus: "not_tracked",
+            }),
       };
 
       verifiedItems.push({
@@ -477,7 +482,7 @@ export async function GET(req: NextRequest) {
         NextResponse.json({ success: true, orders: formatted })
       );
     } else {
-      // Admins see all orders with pagination, search, filters, customer contact, and delivery summary
+      // Admins see all orders with server-side pagination, search, filters, customer contact, and delivery summary
       const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
       const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
       const search = searchParams.get("search")?.trim().toLowerCase();
@@ -488,60 +493,86 @@ export async function GET(req: NextRequest) {
       const endDate = searchParams.get("endDate");
       const all = searchParams.get("all") === "true";
 
-      const orderRows = await db
-        .select({
-          order: orders,
-          customer: {
-            id: users.id,
-            fullName: users.fullName,
-            email: users.email,
-            phone: users.phone,
-          },
-        })
-        .from(orders)
-        .leftJoin(users, eq(orders.customerId, users.id))
-        .orderBy(desc(orders.createdAt));
+      // Build server-side SQL conditions
+      const conditions: any[] = [];
 
-      const filtered = orderRows.filter(({ order, customer }) => {
-        if (orderStatus && orderStatus !== "all" && order.orderStatus !== orderStatus) {
-          return false;
+      if (orderStatus && orderStatus !== "all") {
+        conditions.push(eq(orders.orderStatus, orderStatus as any));
+      }
+      if (paymentStatus && paymentStatus !== "all") {
+        conditions.push(eq(orders.paymentStatus, paymentStatus as any));
+      }
+      if (deliveryType && deliveryType !== "all") {
+        conditions.push(eq(orders.deliveryType, deliveryType as any));
+      }
+      if (startDate) {
+        const startTs = new Date(startDate).getTime();
+        if (!isNaN(startTs)) conditions.push(sql`${orders.createdAt} >= ${startTs}`);
+      }
+      if (endDate) {
+        const endTs = new Date(endDate).getTime();
+        if (!isNaN(endTs)) conditions.push(sql`${orders.createdAt} <= ${endTs}`);
+      }
+      if (search) {
+        const searchPattern = `%${search}%`;
+        conditions.push(
+          or(
+            sql`lower(${orders.orderReference}) LIKE ${searchPattern}`,
+            sql`lower(${users.fullName}) LIKE ${searchPattern}`,
+            sql`lower(${users.phone}) LIKE ${searchPattern}`,
+            sql`lower(${users.email}) LIKE ${searchPattern}`
+          )
+        );
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      // 1. Authoritative total matching count query
+      const countResult = await timer.measure("database.orders.count", () =>
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(orders)
+          .leftJoin(users, eq(orders.customerId, users.id))
+          .where(whereClause)
+      );
+
+      const total = Number(countResult[0]?.count || 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const offset = (page - 1) * limit;
+
+      // 2. Fetch paginated slice with stable tie-breaker ordering
+      const orderRows = await timer.measure("database.orders.fetch_page", () => {
+        let q = db
+          .select({
+            order: orders,
+            customer: {
+              id: users.id,
+              fullName: users.fullName,
+              email: users.email,
+              phone: users.phone,
+            },
+          })
+          .from(orders)
+          .leftJoin(users, eq(orders.customerId, users.id))
+          .where(whereClause)
+          .orderBy(desc(orders.createdAt), desc(orders.id));
+
+        if (!all) {
+          q = q.limit(limit).offset(offset) as any;
         }
-        if (paymentStatus && paymentStatus !== "all" && order.paymentStatus !== paymentStatus) {
-          return false;
-        }
-        if (deliveryType && deliveryType !== "all" && order.deliveryType !== deliveryType) {
-          return false;
-        }
-        if (startDate) {
-          const startTs = new Date(startDate).getTime();
-          if (!isNaN(startTs) && order.createdAt < startTs) return false;
-        }
-        if (endDate) {
-          const endTs = new Date(endDate).getTime();
-          if (!isNaN(endTs) && order.createdAt > endTs) return false;
-        }
-        if (search) {
-          const refMatch = order.orderReference.toLowerCase().includes(search);
-          const nameMatch = customer?.fullName?.toLowerCase().includes(search);
-          const phoneMatch = customer?.phone?.toLowerCase().includes(search);
-          const emailMatch = customer?.email?.toLowerCase().includes(search);
-          if (!refMatch && !nameMatch && !phoneMatch && !emailMatch) return false;
-        }
-        return true;
+        return q;
       });
 
-      const total = filtered.length;
-      const totalPages = Math.max(1, Math.ceil(total / limit));
-      const paginated = all ? filtered : filtered.slice((page - 1) * limit, page * limit);
-
-      const targetOrderIds = paginated.map((r) => r.order.id);
+      const targetOrderIds = orderRows.map((r: any) => r.order.id);
       const itemCountMap = new Map<string, number>();
 
       if (targetOrderIds.length > 0) {
-        const items = await db
-          .select({ orderId: orderItems.orderId, quantity: orderItems.quantity })
-          .from(orderItems)
-          .where(inArray(orderItems.orderId, targetOrderIds));
+        const items = await timer.measure("database.items.fetch_page", () =>
+          db
+            .select({ orderId: orderItems.orderId, quantity: orderItems.quantity })
+            .from(orderItems)
+            .where(inArray(orderItems.orderId, targetOrderIds))
+        );
 
         for (const item of items) {
           itemCountMap.set(
@@ -551,7 +582,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const formattedOrders = paginated.map(({ order, customer }) => {
+      const formattedOrders = orderRows.map(({ order, customer }: any) => {
         let addr: any = null;
         try {
           if (order.shippingAddressJson) addr = JSON.parse(order.shippingAddressJson);
@@ -590,6 +621,9 @@ export async function GET(req: NextRequest) {
             page: all ? 1 : page,
             limit: all ? total : limit,
             totalPages: all ? 1 : totalPages,
+            hasNextPage: all ? false : page < totalPages,
+            hasPrevPage: all ? false : page > 1,
+            resultCount: formattedOrders.length,
           },
         })
       );

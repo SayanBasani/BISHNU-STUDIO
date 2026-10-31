@@ -33,6 +33,7 @@
 26. [Git Workflow, Branch Standards & Contributor Guidelines](#26-git-workflow-branch-standards--contributor-guidelines)
 27. [Notification Architecture, Authentication Security & Session Management](#27-notification-architecture-authentication-security--session-management)
 28. [Authentication State Hydration, Persistent Profile Avatars & Mobile Identity (BS-AUTH-03A)](#28-authentication-state-hydration-persistent-profile-avatars--mobile-identity-bs-auth-03a)
+29. [Order Table Fit, Pagination, Product Operations & Inventory Safety (BS-ORDERS-04B)](#29-order-table-fit-pagination-product-operations--inventory-safety-bs-orders-04b)
 - [Appendix: Environment-Variable Reference Table](#appendix-environment-variable-reference-table)
 - [Developer & Credits Information](#developer--credits-information)
 
@@ -949,6 +950,48 @@ On mobile viewports (`< 640px` and down to `320px`), an account preview indicato
   Customer notification polling is strictly suspended while `authLoading === true` or when `user === null`, eliminating 401 Unauthorized errors and duplicate network requests during initial page hydration.
 - **In-Flight Request Deduplication**:
   Module-level promise deduplication in `AuthContext` and `NotificationBell` ensures concurrent components share a single in-flight network request.
+
+---
+
+## 29. Order Table Fit, Pagination, Product Operations & Inventory Safety (BS-ORDERS-04B)
+
+### A. Payment Reconciliation Safety
+- **Reversion of Silent Auto-Verification**: Updating an order's payment status to `paid` (e.g. for cash-on-collection or administrative payment overrides) strictly does **not** auto-verify pending payment claims.
+- **Authoritative Verification**: Payment claims are authoritatively verified exclusively via `POST /api/admin/payments/[id]/verify`, recording admin ID, timestamp, transaction ID, and verified amount in the master `payments` table.
+
+### B. All Orders Table Fit at Desktop Viewports (1280px, 1366px, 1440px, 1920px)
+- **11 Total Columns**:
+  1. `#` — Sequential row number (`((page - 1) * limit) + idx + 1`).
+  2. `Order Ref` — Monospace reference with compact copy button.
+  3. `Date & Time` — Formatted via `formatCompactDateTime(ord.createdAt)` (e.g., `31/10/2026, 12:44 AM`).
+  4. `Customer` — Customer name and contact phone with hover truncation.
+  5. `Fulfillment` — Pickup vs. Delivery with missing-address warning.
+  6. `Items` — Compact quantity badge.
+  7. `Total` — Currency-formatted total amount.
+  8. `Payment Method` — Compact badge (`UPI`, `Cash`, `COD`, `Online`) with icon.
+  9. `Payment Status` — Standard status badge (`Paid`, `Pending`, `Unpaid`, `Refunded`).
+  10. `Order Status` — Standard lifecycle badge (`Pending`, `Confirmed`, `Processing`, etc.).
+  11. `Actions` — Compact eye-icon button with tooltip and `aria-label="View Order Details"`.
+- **Elimination of `min-w-[1200px]`**: The table width is sized proportionally to fit within ~1050px available content width (after sidebar and padding), rendering without horizontal scrollbars at 1366px and 1440px.
+
+### C. Server-Side Pagination & URL State
+- **Server SQL Count & Offset**: `GET /api/orders` applies SQL filters and pagination (`LIMIT` and `OFFSET`) on the database query with stable tie-breaker ordering (`desc(orders.createdAt), desc(orders.id)`), loading `orderItems` only for the current page's orders.
+- **Pagination Metadata**: Returns `total`, `page`, `limit`, `totalPages`, `hasNextPage`, `hasPrevPage`, and `resultCount`.
+- **URL Synchronization**: Page, limit (20, 50, 100), search, and filter changes synchronize with URL parameters without full page reload.
+
+### D. Product Operations & SKU Copy
+- **Historical Snapshot Priority**: Stored product name, SKU, price, and image in `configurationJson` take precedence. Catalog lookup serves as a fallback for legacy items. If a catalog product is deleted, historical item information remains visible with an unavailable badge.
+- **SKU Copy Action**: Compact copy icon beside every SKU copies the exact string to clipboard with toast/checkmark feedback.
+- **Product Navigation**: Product name and thumbnail link directly to `/admin/products?edit=${productId}`, which automatically opens the catalog edit modal.
+
+### E. Safe Inventory Lifecycle & Double-Deduction Prevention
+- **Checkout Stock Movement**: Standard checkout decrements `products.stockQuantity` on order placement and marks `stockDeductionStatus: "deducted_at_checkout"`.
+- **Idempotent Deduction Endpoint**: `POST /api/admin/orders/[id]/items/[itemId]/deduct-stock` checks item status. Repeated clicks or retries return existing deduction details without double-decrementing stock.
+- **Service Guard**: Print services (PVC, document print, lamination, photo print) are identified as `Not tracked` and reject stock deductions.
+- **Confirmation Modal**: Displays live catalog stock, ordered quantity, and expected post-deduction stock from `GET /api/admin/orders/[id]/items/[itemId]/inventory`.
+
+### F. Development Cleanup Audit
+- Production rejection (`NODE_ENV === "production"` with 403), admin authorization check, password re-authentication, and exact confirmation phrase (`WIPE DEVELOPMENT DATA`) verified. Master admin and configuration records preserved.
 
 ---
 
