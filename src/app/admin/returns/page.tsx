@@ -156,11 +156,11 @@ export default function AdminReturnsPage() {
                 <tr>
                   <th className="py-3 px-4">Return Reference</th>
                   <th className="py-3 px-4">Reason</th>
-                  <th className="py-3 px-4">Resolution</th>
                   <th className="py-3 px-4">Est. Refund</th>
-                  <th className="py-3 px-4">Logistics Partner</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Created Date</th>
+                  <th className="py-3 px-4">Logistics</th>
+                  <th className="py-3 px-4">Physical Status</th>
+                  <th className="py-3 px-4">Refund Status</th>
+                  <th className="py-3 px-4">Date</th>
                   <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
@@ -175,9 +175,6 @@ export default function AdminReturnsPage() {
                     </td>
                     <td className="py-3.5 px-4 capitalize text-slate-700 dark:text-slate-300">
                       {ret.reason?.replace(/_/g, " ")}
-                    </td>
-                    <td className="py-3.5 px-4 capitalize font-semibold text-purple-600 dark:text-purple-400">
-                      {ret.requestedResolution}
                     </td>
                     <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
                       {ret.refundAmount ? formatINR(ret.refundAmount) : "—"}
@@ -203,6 +200,21 @@ export default function AdminReturnsPage() {
                         )}`}
                       >
                         {ret.status?.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span
+                        className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          ret.refundStatus === "paid"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200"
+                            : ret.refundStatus === "disputed"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200"
+                            : ret.refundStatus === "not_eligible"
+                            ? "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border border-slate-200"
+                            : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200"
+                        }`}
+                      >
+                        {(ret.refundStatus || "pending_review").replace(/_/g, " ")}
                       </span>
                     </td>
                     <td className="py-3.5 px-4 text-slate-500 font-mono text-[11px]">

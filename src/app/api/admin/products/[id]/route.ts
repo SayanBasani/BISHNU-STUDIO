@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
-import { products, productImages } from "@/db/schema";
+import { products, productImages, productCategories } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -14,6 +14,7 @@ const imageItemSchema = z.object({
 });
 
 const updateProductSchema = z.object({
+  categoryId: z.string().min(1).optional(),
   name: z.string().min(2).optional(),
   description: z.string().min(5).optional(),
   price: z.number().min(0.01).optional(),
@@ -52,6 +53,17 @@ export async function PUT(
 
     if (existing.length === 0) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    }
+
+    if (validation.data.categoryId) {
+      const cat = await db
+        .select()
+        .from(productCategories)
+        .where(eq(productCategories.id, validation.data.categoryId))
+        .limit(1);
+      if (cat.length === 0) {
+        return NextResponse.json({ error: "Category not found" }, { status: 400 });
+      }
     }
 
     const { imageUrl, images, ...updateFields } = validation.data;

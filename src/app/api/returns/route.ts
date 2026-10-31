@@ -12,6 +12,7 @@ import {
 import {
   generateReturnReference,
   evaluateOrderReturnEligibility,
+  maskDestinationDetails,
 } from "@/lib/return-state-machine";
 import { getShopSettings } from "@/lib/settings";
 import { logAuditEvent } from "@/lib/audit";
@@ -37,6 +38,18 @@ const createReturnSchema = z.object({
     .min(10, "Please provide a detailed description (minimum 10 characters)."),
   requestedResolution: z.enum(["refund", "exchange"]).default("refund"),
   pickupMethod: z.enum(["courier_pickup", "counter_dropoff"]).default("courier_pickup"),
+  refundMethod: z.enum(["upi", "bank_transfer", "cash"]).optional(),
+  refundDestination: z
+    .object({
+      upiId: z.string().trim().optional(),
+      accountHolderName: z.string().trim().optional(),
+      accountNumber: z.string().trim().optional(),
+      ifsc: z.string().trim().toUpperCase().optional(),
+      bankName: z.string().trim().optional(),
+      counterLocation: z.string().trim().optional(),
+      contactPhone: z.string().trim().optional(),
+    })
+    .optional(),
   evidenceUrls: z.array(z.string()).optional(),
   items: z
     .array(
@@ -73,6 +86,8 @@ export async function POST(req: NextRequest) {
       customerDescription,
       requestedResolution,
       pickupMethod,
+      refundMethod,
+      refundDestination,
       evidenceUrls,
       items: requestedReturnItems,
     } = validation.data;
@@ -200,6 +215,9 @@ export async function POST(req: NextRequest) {
       pickupMethod,
       evidenceUrlsJson: evidenceUrls && evidenceUrls.length > 0 ? JSON.stringify(evidenceUrls) : null,
       refundAmount: calculatedRefundAmount,
+      refundStatus: "pending_review",
+      refundMethod: refundMethod || (pickupMethod === "counter_dropoff" ? "cash" : "upi"),
+      refundDestinationJson: refundDestination ? JSON.stringify(refundDestination) : null,
       restocked: false,
       createdAt: now,
       updatedAt: now,
@@ -343,7 +361,14 @@ export async function GET(req: NextRequest) {
         requestedResolution: orderReturns.requestedResolution,
         pickupMethod: orderReturns.pickupMethod,
         refundAmount: orderReturns.refundAmount,
+        refundStatus: orderReturns.refundStatus,
         refundMethod: orderReturns.refundMethod,
+        refundProofUrl: orderReturns.refundProofUrl,
+        refundTransactionReference: orderReturns.refundTransactionReference,
+        refundDestinationJson: orderReturns.refundDestinationJson,
+        refundDisbursedAt: orderReturns.refundDisbursedAt,
+        refundDisputeReason: orderReturns.refundDisputeReason,
+        refundDisputedAt: orderReturns.refundDisputedAt,
         courierName: orderReturns.courierName,
         trackingNumber: orderReturns.trackingNumber,
         trackingUrl: orderReturns.trackingUrl,
@@ -366,9 +391,23 @@ export async function GET(req: NextRequest) {
 
     const total = Number(totalCount[0]?.count || 0);
 
+    const mappedReturns = returnRows.map((r) => {
+      let destination: any = null;
+      try {
+        if (r.refundDestinationJson) {
+          destination = maskDestinationDetails(JSON.parse(r.refundDestinationJson));
+        }
+      } catch {}
+      const { refundDestinationJson, ...safeReturn } = r;
+      return {
+        ...safeReturn,
+        refundDestination: destination,
+      };
+    });
+
     return NextResponse.json({
       success: true,
-      returns: returnRows,
+      returns: mappedReturns,
       pagination: {
         total,
         page,

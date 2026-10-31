@@ -67,18 +67,27 @@ function AdminProductsContent() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/products?availableOnly=false");
-      const data = await res.json();
-      if (data.success) {
-        setProducts(data.products);
-        setCategories(data.categories);
-        if (data.categories.length > 0 && !categoryId) {
-          setCategoryId(data.categories[0].id);
+      const [prodRes, catRes] = await Promise.all([
+        fetch("/api/products?availableOnly=false", { cache: "no-store" }),
+        fetch("/api/admin/categories", { cache: "no-store" }),
+      ]);
+      const prodData = await prodRes.json();
+      const catData = catRes.ok ? await catRes.json() : null;
+
+      if (prodData.success) {
+        setProducts(prodData.products);
+        const resolvedCategories =
+          catData?.categories && catData.categories.length > 0
+            ? catData.categories
+            : prodData.categories || [];
+        setCategories(resolvedCategories);
+        if (resolvedCategories.length > 0 && !categoryId) {
+          setCategoryId(resolvedCategories[0].id);
         }
 
         if (editIdParam && !hasProcessedInitialEdit) {
           setHasProcessedInitialEdit(true);
-          const target = (data.products || []).find((p: any) => p.id === editIdParam);
+          const target = (prodData.products || []).find((p: any) => p.id === editIdParam);
           if (target) {
             handleOpenEdit(target);
           } else {
@@ -231,6 +240,7 @@ function AdminProductsContent() {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            categoryId,
             name,
             description,
             price: parseFloat(price),
@@ -449,24 +459,22 @@ function AdminProductsContent() {
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
-              {!editingProduct && (
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Category
-                  </label>
-                  <select
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Category *
+                </label>
+                <select
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

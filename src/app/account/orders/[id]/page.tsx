@@ -14,6 +14,7 @@ import {
   FileText,
   Download,
   AlertCircle,
+  AlertTriangle,
   Truck,
   Store,
   ShieldCheck,
@@ -83,10 +84,27 @@ export default function OrderTrackingDetailPage() {
   const [returnReason, setReturnReason] = useState<string>("damaged");
   const [returnDescription, setReturnDescription] = useState("");
   const [requestedResolution, setRequestedResolution] = useState<"refund" | "exchange">("refund");
+  const [refundMethodPreference, setRefundMethodPreference] = useState<"upi" | "bank_transfer" | "cash">("upi");
+  const [refundUpiId, setRefundUpiId] = useState("");
+  const [refundAccountHolder, setRefundAccountHolder] = useState("");
+  const [refundAccountNumber, setRefundAccountNumber] = useState("");
+  const [refundIfsc, setRefundIfsc] = useState("");
+  const [refundBankName, setRefundBankName] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnError, setReturnError] = useState<string | null>(null);
   const [returnSuccess, setReturnSuccess] = useState<string | null>(null);
   const [copiedTracking, setCopiedTracking] = useState(false);
+
+  // Dispute refund state
+  const [disputeModalOpen, setDisputeModalOpen] = useState(false);
+  const [disputingReturn, setDisputingReturn] = useState<any | null>(null);
+  const [disputeReasonText, setDisputeReasonText] = useState("");
+  const [disputeSubmitting, setDisputeSubmitting] = useState(false);
+  const [disputeError, setDisputeError] = useState<string | null>(null);
+  const [disputeSuccess, setDisputeSuccess] = useState<string | null>(null);
+
+  // Proof inspection lightbox state
+  const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -97,17 +115,18 @@ export default function OrderTrackingDetailPage() {
   const fetchOrder = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/orders/${id}`);
-      const data = await res.json();
+      // Parallelize order and returns fetching to avoid double WAN latency
+      const [orderRes, retRes] = await Promise.all([
+        fetch(`/api/orders/${id}`),
+        fetch(`/api/returns?orderId=${id}`),
+      ]);
+      const data = await orderRes.json();
       if (data.success) {
         setOrder(data.order);
-        try {
-          const retRes = await fetch(`/api/returns?orderId=${id}`);
-          if (retRes.ok) {
-            const retData = await retRes.json();
-            setOrderReturnsList(retData.returns || []);
-          }
-        } catch {}
+      }
+      if (retRes.ok) {
+        const retData = await retRes.json();
+        setOrderReturnsList(retData.returns || []);
       }
     } catch (err) {
       console.error("Failed to load order:", err);
@@ -133,6 +152,18 @@ export default function OrderTrackingDetailPage() {
     }
 
     try {
+      const destinationPayload =
+        refundMethodPreference === "upi"
+          ? { upiId: refundUpiId.trim() }
+          : refundMethodPreference === "bank_transfer"
+          ? {
+              accountHolderName: refundAccountHolder.trim(),
+              accountNumber: refundAccountNumber.trim(),
+              ifsc: refundIfsc.trim().toUpperCase(),
+              bankName: refundBankName.trim(),
+            }
+          : { counterLocation: "Bishnu Studio Main Counter" };
+
       const res = await fetch("/api/returns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -142,6 +173,8 @@ export default function OrderTrackingDetailPage() {
           customerDescription: returnDescription.trim(),
           requestedResolution,
           pickupMethod: order?.deliveryType === "store_pickup" ? "counter_dropoff" : "courier_pickup",
+          refundMethod: refundMethodPreference,
+          refundDestination: destinationPayload,
           items: itemsPayload,
         }),
       });
@@ -159,6 +192,47 @@ export default function OrderTrackingDetailPage() {
       setReturnError(err?.message || "Failed to submit return request.");
     } finally {
       setReturnSubmitting(false);
+    }
+  };
+
+  const handleDisputeRefund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!disputingReturn) return;
+
+    setDisputeSubmitting(true);
+    setDisputeError(null);
+    setDisputeSuccess(null);
+
+    if (disputeReasonText.trim().length < 10) {
+      setDisputeError("Please describe the issue in detail (minimum 10 characters).");
+      setDisputeSubmitting(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/returns/${disputingReturn.id}/dispute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          disputeReason: disputeReasonText.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to record dispute.");
+
+      setDisputeSuccess("Your refund dispute has been submitted to studio management with high priority.");
+      setTimeout(async () => {
+        setDisputeModalOpen(false);
+        setDisputingReturn(null);
+        setDisputeReasonText("");
+        setDisputeSuccess(null);
+        await fetchOrder();
+      }, 2500);
+    } catch (err: any) {
+      setDisputeError(err?.message || "Failed to submit dispute.");
+    } finally {
+      setDisputeSubmitting(false);
     }
   };
 
@@ -411,6 +485,37 @@ export default function OrderTrackingDetailPage() {
         variant = "danger";
         break;
       default:
+        // Handle return & refund actions from customerMessage
+        const msg = (ev.customerMessage || "").toLowerCase();
+        if (ev.newPaymentStatus === "refunded" || msg.includes("refund disbursed") || msg.includes("refund processed")) {
+          title = "Refund Disbursed & Settled";
+          icon = CreditCard;
+          variant = "completed";
+        } else if (msg.includes("dispute")) {
+          title = "Refund Disputed";
+          icon = AlertTriangle;
+          variant = "warning";
+        } else if (msg.includes("return requested")) {
+          title = "Return Requested";
+          icon = RotateCcw;
+          variant = "active";
+        } else if (msg.includes("return approved")) {
+          title = "Return Approved";
+          icon = CheckCircle2;
+          variant = "completed";
+        } else if (msg.includes("pickup scheduled") || msg.includes("picked up")) {
+          title = "Return Pickup Logistics";
+          icon = Truck;
+          variant = "active";
+        } else if (msg.includes("inspection passed")) {
+          title = "Inspection Passed";
+          icon = ShieldCheck;
+          variant = "completed";
+        } else if (msg.includes("inspection failed") || msg.includes("declined")) {
+          title = "Inspection / Return Declined";
+          icon = AlertCircle;
+          variant = "danger";
+        }
         break;
     }
 
@@ -1072,60 +1177,222 @@ export default function OrderTrackingDetailPage() {
               </div>
             </div>
 
-            {/* Returns & Exchanges Summary Card */}
+            {/* Complete Return & Refund Journey Section */}
             {orderReturnsList.length > 0 && (
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-sm text-xs">
-                <h3 className="font-bold text-slate-900 dark:text-white text-sm border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4 text-purple-600" /> Return &amp; Refund Status
-                </h3>
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-purple-200 dark:border-purple-800/60 p-6 space-y-6 shadow-sm text-xs">
+                <div className="border-b border-purple-100 dark:border-purple-800/60 pb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4 text-purple-600" /> Return &amp; Refund Journey
+                  </h3>
+                  <span className="text-[11px] text-purple-700 dark:text-purple-300 font-semibold">
+                    {orderReturnsList.length} Return Request(s)
+                  </span>
+                </div>
 
-                <div className="space-y-3">
-                  {orderReturnsList.map((ret: any) => (
-                    <div
-                      key={ret.id}
-                      className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold font-mono text-slate-900 dark:text-white">
-                          {ret.returnReference}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            ret.status === "completed" || ret.status === "refund_processed"
-                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                              : ret.status === "rejected" || ret.status === "cancelled"
-                              ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
-                              : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                          }`}
-                        >
-                          {ret.status.replace(/_/g, " ")}
-                        </span>
-                      </div>
+                <div className="space-y-6">
+                  {orderReturnsList.map((ret: any) => {
+                    const isPhysicalDone =
+                      ret.status === "return_completed" || ret.status === "completed";
+                    const isRejected = ret.status === "rejected" || ret.status === "cancelled";
+                    const isPaid = ret.refundStatus === "paid" || ret.status === "refund_processed";
+                    const isDisputed = ret.refundStatus === "disputed";
 
-                      <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                        Reason: <strong className="capitalize">{ret.reason.replace(/_/g, " ")}</strong>
-                      </p>
+                    // Physical journey milestones:
+                    // 1: Requested -> 2: Approved -> 3: Picked Up / Received -> 4: Inspection -> 5: Completed
+                    let physicalStep = 1;
+                    if (ret.status === "approved" || ret.status === "pickup_scheduled") physicalStep = 2;
+                    else if (
+                      ret.status === "picked_up" ||
+                      ret.status === "counter_dropoff" ||
+                      ret.status === "in_transit" ||
+                      ret.status === "received_at_studio" ||
+                      ret.status === "received"
+                    ) physicalStep = 3;
+                    else if (
+                      ret.status === "inspection_in_progress" ||
+                      ret.status === "inspection_passed" ||
+                      ret.status === "inspection_failed"
+                    ) physicalStep = 4;
+                    else if (isPhysicalDone) physicalStep = 5;
 
-                      {ret.refundAmount && (
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                          Eligible Refund: <strong className="text-slate-900 dark:text-white">{formatINR(ret.refundAmount)}</strong>
-                        </p>
-                      )}
+                    return (
+                      <div
+                        key={ret.id}
+                        className="p-5 rounded-2xl bg-purple-50/40 dark:bg-purple-950/20 border border-purple-200/80 dark:border-purple-800/50 space-y-4"
+                      >
+                        {/* Return Title & Status Badges */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100 dark:border-purple-800/40 pb-3">
+                          <div>
+                            <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
+                              {ret.returnReference}
+                            </span>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Reason: <strong className="capitalize">{ret.reason.replace(/_/g, " ")}</strong>
+                            </p>
+                          </div>
 
-                      {ret.customerInstructions && (
-                        <div className="p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 text-[11px]">
-                          <strong>Studio Notice:</strong> {ret.customerInstructions}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                isPhysicalDone
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                  : isRejected
+                                  ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                                  : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
+                              }`}
+                            >
+                              Physical: {ret.status.replace(/_/g, " ")}
+                            </span>
+
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                isPaid
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                  : isDisputed
+                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                                  : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                              }`}
+                            >
+                              Refund: {(ret.refundStatus || "pending_review").replace(/_/g, " ")}
+                            </span>
+                          </div>
                         </div>
-                      )}
 
-                      {ret.courierName && (
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                          Pickup Partner: <strong>{ret.courierName}</strong>
-                          {ret.trackingNumber && ` (AWB: ${ret.trackingNumber})`}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                        {/* Physical Return Stepper */}
+                        <div className="space-y-2">
+                          <span className="font-bold text-[11px] text-slate-600 dark:text-slate-400 uppercase tracking-wider block">
+                            1. Physical Return Journey
+                          </span>
+                          <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
+                            <div className={`p-2 rounded-xl border ${physicalStep >= 1 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
+                              Requested
+                            </div>
+                            <div className={`p-2 rounded-xl border ${physicalStep >= 2 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
+                              Scheduled
+                            </div>
+                            <div className={`p-2 rounded-xl border ${physicalStep >= 3 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
+                              Received &bull; Studio
+                            </div>
+                            <div className={`p-2 rounded-xl border ${physicalStep >= 4 ? "bg-purple-600 text-white font-bold" : "bg-white dark:bg-slate-800 text-slate-400"}`}>
+                              Inspected
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Courier / Logistics Details */}
+                        {ret.courierName && (
+                          <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] space-y-1">
+                            <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <Truck className="w-3.5 h-3.5 text-purple-600" /> Pickup Logistics Partner: {ret.courierName}
+                            </p>
+                            {ret.trackingNumber && (
+                              <p className="font-mono text-slate-600 dark:text-slate-300">
+                                AWB Tracking Ref: <strong>{ret.trackingNumber}</strong>
+                              </p>
+                            )}
+                            {ret.trackingUrl && (
+                              <a
+                                href={ret.trackingUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-purple-600 hover:underline font-bold inline-flex items-center gap-1"
+                              >
+                                Track Pickup Live <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Customer Instructions from Studio */}
+                        {ret.customerInstructions && (
+                          <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-[11px]">
+                            <strong>Studio Instructions:</strong> {ret.customerInstructions}
+                          </div>
+                        )}
+
+                        {/* Rejection Notice if rejected */}
+                        {ret.rejectionReason && (
+                          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-[11px]">
+                            <strong>Decline Reason:</strong> {ret.rejectionReason}
+                          </div>
+                        )}
+
+                        {/* Customer Refund Destination Preference */}
+                        {ret.refundDestination && (
+                          <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] space-y-1 text-slate-600 dark:text-slate-300">
+                            <span className="font-bold text-slate-900 dark:text-white block">
+                              Your Chosen Payout Destination:
+                            </span>
+                            {ret.refundDestination.upiId && (
+                              <p>UPI ID: <span className="font-mono font-bold text-purple-600">{ret.refundDestination.upiId}</span></p>
+                            )}
+                            {ret.refundDestination.accountNumber && (
+                              <p>
+                                Bank Transfer: {ret.refundDestination.bankName || "Bank"} (Account: <span className="font-mono">{ret.refundDestination.accountNumber}</span>)
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Verified Refund Settlement Card (Paid) */}
+                        {isPaid && (
+                          <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300">
+                                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                                Refund Disbursed &amp; Settled
+                              </span>
+                              <span className="font-black text-sm text-emerald-700 dark:text-emerald-300 font-mono">
+                                {formatINR(ret.refundAmount || order.totalAmount)}
+                              </span>
+                            </div>
+
+                            <p className="text-[11px]">
+                              Payout Reference: <strong className="font-mono">{ret.refundTransactionReference || "Verified Transfer"}</strong>
+                              {ret.refundDisbursedAt && ` • Disbursed on ${new Date(ret.refundDisbursedAt).toLocaleDateString("en-IN")}`}
+                            </p>
+
+                            <div className="flex flex-wrap items-center gap-3 pt-1">
+                              {ret.refundProofUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setProofPreviewUrl(ret.refundProofUrl)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs"
+                                >
+                                  <Eye className="w-3.5 h-3.5" /> Inspect Payout Receipt
+                                </button>
+                              )}
+
+                              {!isDisputed && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDisputingReturn(ret);
+                                    setDisputeModalOpen(true);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 hover:bg-amber-100 text-[11px] font-semibold transition"
+                                >
+                                  Dispute Refund / Payment Not Received
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Disputed Alert Banner for Customer */}
+                        {isDisputed && (
+                          <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100 text-[11px] space-y-1">
+                            <p className="font-bold flex items-center gap-1.5">
+                              <AlertTriangle className="w-4 h-4 text-amber-600" /> Dispute Under Review by Studio Finance
+                            </p>
+                            <p>
+                              You reported: &ldquo;{ret.refundDisputeReason || "Payment discrepancy"}&rdquo;. Our manager will contact you with resolution details.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1371,7 +1638,7 @@ export default function OrderTrackingDetailPage() {
                       onChange={() => setRequestedResolution("refund")}
                       className="text-purple-600"
                     />
-                    <span>Refund (UPI/Bank)</span>
+                    <span>Refund (UPI / Bank / Cash)</span>
                   </label>
                   <label className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center gap-2 cursor-pointer font-semibold">
                     <input
@@ -1386,6 +1653,134 @@ export default function OrderTrackingDetailPage() {
                   </label>
                 </div>
               </div>
+
+              {/* Refund Method & Destination Preference */}
+              {requestedResolution === "refund" && (
+                <div className="p-3.5 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 space-y-3">
+                  <label className="block font-bold text-purple-900 dark:text-purple-300">
+                    Preferred Refund Settlement Method *
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="p-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 flex items-center gap-1.5 cursor-pointer font-semibold text-[11px]">
+                      <input
+                        type="radio"
+                        name="refundMethod"
+                        value="upi"
+                        checked={refundMethodPreference === "upi"}
+                        onChange={() => setRefundMethodPreference("upi")}
+                        className="text-purple-600"
+                      />
+                      <span>UPI</span>
+                    </label>
+                    <label className="p-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 flex items-center gap-1.5 cursor-pointer font-semibold text-[11px]">
+                      <input
+                        type="radio"
+                        name="refundMethod"
+                        value="bank_transfer"
+                        checked={refundMethodPreference === "bank_transfer"}
+                        onChange={() => setRefundMethodPreference("bank_transfer")}
+                        className="text-purple-600"
+                      />
+                      <span>Bank</span>
+                    </label>
+                    <label className="p-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-800 flex items-center gap-1.5 cursor-pointer font-semibold text-[11px]">
+                      <input
+                        type="radio"
+                        name="refundMethod"
+                        value="cash"
+                        checked={refundMethodPreference === "cash"}
+                        onChange={() => setRefundMethodPreference("cash")}
+                        className="text-purple-600"
+                      />
+                      <span>Cash</span>
+                    </label>
+                  </div>
+
+                  {refundMethodPreference === "upi" && (
+                    <div>
+                      <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Your UPI ID (VPA) *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. mobile@upi, name@okaxis"
+                        value={refundUpiId}
+                        onChange={(e) => setRefundUpiId(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  )}
+
+                  {refundMethodPreference === "bank_transfer" && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            Account Holder Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Full name as in bank"
+                            value={refundAccountHolder}
+                            onChange={(e) => setRefundAccountHolder(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            Bank Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. SBI, HDFC"
+                            value={refundBankName}
+                            onChange={(e) => setRefundBankName(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            Account Number *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Bank account number"
+                            value={refundAccountNumber}
+                            onChange={(e) => setRefundAccountNumber(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-slate-900 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            IFSC Code *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. SBIN0001234"
+                            value={refundIfsc}
+                            onChange={(e) => setRefundIfsc(e.target.value.toUpperCase())}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono uppercase text-slate-900 dark:text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {refundMethodPreference === "cash" && (
+                    <p className="text-[11px] text-purple-700 dark:text-purple-300">
+                      Cash refund will be handed over in person at Bishnu Studio counter upon physical item return and signed receipt voucher.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -1418,6 +1813,116 @@ export default function OrderTrackingDetailPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Dispute Refund Modal */}
+      {disputeModalOpen && disputingReturn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  Dispute Refund Payout
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Return #{disputingReturn.returnReference}
+                </p>
+              </div>
+              <button
+                onClick={() => setDisputeModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {disputeError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                {disputeError}
+              </div>
+            )}
+
+            {disputeSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300">
+                {disputeSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleDisputeRefund} className="space-y-4 text-xs">
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                If the refund has not reflected in your bank account, was disbursed for an incorrect amount, or was sent to an incorrect UPI ID, please describe the discrepancy below. Studio finance will re-check with our bank.
+              </p>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Dispute Reason &amp; Details *
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  minLength={10}
+                  placeholder="e.g. UTR number not credited to my bank account, or amount received was less than eligible refund..."
+                  value={disputeReasonText}
+                  onChange={(e) => setDisputeReasonText(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDisputeModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={disputeSubmitting}
+                  className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold transition disabled:opacity-50"
+                >
+                  {disputeSubmitting ? "Submitting Dispute..." : "Submit Refund Dispute"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Payout Proof Lightbox */}
+      {proofPreviewUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setProofPreviewUrl(null)}
+        >
+          <div className="relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setProofPreviewUrl(null)}
+              className="absolute -top-10 right-0 text-white hover:text-slate-300"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <div className="bg-slate-900 rounded-2xl overflow-hidden border border-slate-700">
+              <div className="p-3 bg-slate-800 border-b border-slate-700 text-xs font-bold text-white flex items-center justify-between">
+                <span>Verified Studio Payout Receipt</span>
+                <a
+                  href={proofPreviewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-purple-400 hover:underline flex items-center gap-1"
+                >
+                  Open Original <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <img
+                src={proofPreviewUrl}
+                alt="Refund Payout Proof"
+                className="w-full max-h-[75vh] object-contain bg-black"
+              />
+            </div>
           </div>
         </div>
       )}

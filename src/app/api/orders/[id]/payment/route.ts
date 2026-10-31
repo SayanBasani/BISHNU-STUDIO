@@ -442,7 +442,7 @@ export async function POST(
         category: "payment",
         eventType: "payment_proof_submitted",
         title: `Payment Proof Submitted (${order.orderReference})`,
-        message: `Customer submitted payment proof (UTR: ${cleanTrId}) for ₹${(order.totalAmount / 100).toFixed(2)}. ${isDuplicateFlagged ? "FLAGGED: Possible duplicate." : "Requires verification."}`,
+        message: `Customer submitted payment proof (UTR: ${cleanTrId}) for ₹${order.totalAmount.toFixed(2)}. ${isDuplicateFlagged ? "FLAGGED: Possible duplicate." : "Requires verification."}`,
         entityType: "payment",
         entityId: submissionId,
         linkUrl: `/admin/orders/${id}`,

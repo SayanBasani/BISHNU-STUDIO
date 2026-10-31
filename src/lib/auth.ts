@@ -12,6 +12,21 @@ const SESSION_MAX_AGE_DAYS = parseInt(
   10
 );
 
+// High-performance in-memory session cache (30s TTL) to eliminate duplicate WAN DB roundtrips
+interface CachedSessionEntry {
+  data: { session: any; user: any } | null;
+  expiresAt: number;
+}
+const sessionMemoryCache = new Map<string, CachedSessionEntry>();
+
+export function clearSessionMemoryCache(token?: string) {
+  if (token) {
+    sessionMemoryCache.delete(token);
+  } else {
+    sessionMemoryCache.clear();
+  }
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return await bcrypt.hash(password, 10);
 }
@@ -75,10 +90,12 @@ export async function createSession(
 }
 
 export async function invalidateSession(sessionToken: string) {
+  clearSessionMemoryCache(sessionToken);
   await db.delete(sessions).where(eq(sessions.sessionToken, sessionToken));
 }
 
 export async function invalidateAllUserSessions(userId: string) {
+  clearSessionMemoryCache();
   await db.delete(sessions).where(eq(sessions.userId, userId));
 }
 
@@ -102,11 +119,13 @@ export async function getUserSessions(userId: string) {
 }
 
 export async function revokeSessionById(sessionId: string) {
+  clearSessionMemoryCache();
   await db.delete(sessions).where(eq(sessions.id, sessionId));
   return { success: true };
 }
 
 export async function forceLogoutCustomer(userId: string, adminId: string) {
+  clearSessionMemoryCache();
   const userRows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (userRows.length === 0) {
     throw new Error("Customer not found");
@@ -172,6 +191,7 @@ export async function blockCustomer({
     .where(eq(users.id, userId));
 
   // Invalidate all sessions immediately across all devices
+  clearSessionMemoryCache();
   await db.delete(sessions).where(eq(sessions.userId, userId));
 
   return { success: true, userId, blockedAt: now };
@@ -218,6 +238,19 @@ export async function unblockCustomer({
 
 export async function validateSession(sessionToken: string) {
   const now = Date.now();
+  const cached = sessionMemoryCache.get(sessionToken);
+  if (cached && cached.expiresAt > now) {
+    if (cached.data?.user?.role === "admin") {
+      const currentFingerprint = getAdminCredentialFingerprint();
+      if (!cached.data.session.credentialVersion || cached.data.session.credentialVersion !== currentFingerprint) {
+        sessionMemoryCache.delete(sessionToken);
+        await db.delete(sessions).where(eq(sessions.id, cached.data.session.id));
+        return null;
+      }
+    }
+    return cached.data;
+  }
+
   const sessionRows = await db
     .select({
       session: sessions,
@@ -234,6 +267,7 @@ export async function validateSession(sessionToken: string) {
     .limit(1);
 
   if (sessionRows.length === 0) {
+    sessionMemoryCache.set(sessionToken, { data: null, expiresAt: now + 5000 });
     return null;
   }
 
@@ -241,6 +275,7 @@ export async function validateSession(sessionToken: string) {
 
   if (user.status === "blocked") {
     // Immediately invalidate all active sessions for blocked user
+    sessionMemoryCache.delete(sessionToken);
     await db.delete(sessions).where(eq(sessions.userId, user.id));
     return null;
   }
@@ -252,6 +287,7 @@ export async function validateSession(sessionToken: string) {
     if (!session.credentialVersion || session.credentialVersion !== currentFingerprint) {
       // Credentials rotated or session issued under outdated credentials!
       // Invalidate this session immediately across all devices
+      sessionMemoryCache.delete(sessionToken);
       await db.delete(sessions).where(eq(sessions.id, session.id));
       return null;
     }
@@ -271,8 +307,10 @@ export async function validateSession(sessionToken: string) {
   }
 
   const { passwordHash: _, ...safeUser } = user;
+  const result = { session, user: safeUser };
+  sessionMemoryCache.set(sessionToken, { data: result, expiresAt: now + 30_000 });
 
-  return { session, user: safeUser };
+  return result;
 }
 
 const memoizeRequest =

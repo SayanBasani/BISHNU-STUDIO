@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
         createdAt: products.createdAt,
       })
       .from(products)
-      .innerJoin(productCategories, eq(products.categoryId, productCategories.id))
+      .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
       .where(whereClause);
 
     // Fetch images only for matching products to prevent loading entire table
@@ -101,8 +101,10 @@ export async function GET(req: NextRequest) {
       .orderBy(productCategories.sortOrder);
 
     const headers: Record<string, string> = {};
-    if (!search) {
+    if (!search && availableOnly) {
       headers["Cache-Control"] = "public, s-maxage=60, stale-while-revalidate=300";
+    } else {
+      headers["Cache-Control"] = "no-store";
     }
 
     return NextResponse.json(
