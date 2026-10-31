@@ -1,7 +1,7 @@
 "use strict";
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
@@ -28,13 +28,14 @@ import {
   Bell,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
+import UserAvatar from "@/components/ui/UserAvatar";
 import { fetchPublicShopSettings } from "@/lib/public-settings";
 
 let cachedNavShop: { shopName: string; logoUrl: string | null } | null = null;
 
 export default function Navbar() {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, loading: authLoading, logout } = useAuth();
   const { cartCount } = useCart();
   const { theme, toggleTheme } = useTheme();
 
@@ -44,6 +45,10 @@ export default function Navbar() {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [mobileAccountMenuOpen, setMobileAccountMenuOpen] = useState(false);
+
+  const desktopDropdownRef = useRef<HTMLDivElement>(null);
+  const mobileAccountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (cachedNavShop) {
@@ -62,23 +67,48 @@ export default function Navbar() {
     });
   }, []);
 
-  // Close mobile drawer on route change
+  // Close menus on route change
   useEffect(() => {
     setMobileMenuOpen(false);
     setUserDropdownOpen(false);
+    setMobileAccountMenuOpen(false);
   }, [pathname]);
 
-  // Handle Escape key to close mobile menu
+  // Handle Escape key to close menus
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setMobileMenuOpen(false);
         setUserDropdownOpen(false);
+        setMobileAccountMenuOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Handle clicks outside dropdowns
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        userDropdownOpen &&
+        desktopDropdownRef.current &&
+        !desktopDropdownRef.current.contains(target)
+      ) {
+        setUserDropdownOpen(false);
+      }
+      if (
+        mobileAccountMenuOpen &&
+        mobileAccountRef.current &&
+        !mobileAccountRef.current.contains(target)
+      ) {
+        setMobileAccountMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [userDropdownOpen, mobileAccountMenuOpen]);
 
   // Prevent background scrolling when mobile drawer is open
   useEffect(() => {
@@ -113,7 +143,7 @@ export default function Navbar() {
               href="/"
               className="flex items-center gap-2 sm:gap-3 shrink-0 group focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-xl p-1"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform shrink-0">
                 <Printer className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div className="truncate">
@@ -148,8 +178,8 @@ export default function Navbar() {
               })}
             </nav>
 
-            {/* Right Action Icons (Theme, Cart, Account, Mobile Hamburger) */}
-            <div className="flex items-center gap-1 sm:gap-2">
+            {/* Right Action Controls */}
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {/* Theme Toggle Button */}
               <button
                 type="button"
@@ -179,30 +209,141 @@ export default function Navbar() {
                 )}
               </Link>
 
-              {/* Notification Bell (when authenticated) */}
-              {user && (
+              {/* Notification Bell (rendered only when authenticated) */}
+              {!authLoading && user && (
                 <NotificationBell scope="customer" viewAllUrl="/account/notifications" />
               )}
 
-              {/* Desktop User Account Menu */}
-              {user ? (
-                <div className="relative hidden sm:block">
+              {/* Mobile Account Preview Button (< sm screens) */}
+              <div className="sm:hidden flex items-center" ref={mobileAccountRef}>
+                {authLoading ? (
+                  <div
+                    className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700/70 animate-pulse shrink-0"
+                    aria-label="Loading account"
+                  />
+                ) : user ? (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setMobileAccountMenuOpen(!mobileAccountMenuOpen)}
+                      className="flex items-center gap-1.5 p-1 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition focus:outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
+                      aria-label={`Account preview: ${user.fullName}`}
+                      aria-expanded={mobileAccountMenuOpen}
+                    >
+                      <UserAvatar
+                        src={user.avatarUrl}
+                        name={user.fullName}
+                        size="md"
+                      />
+                      <span className="hidden xs:inline-block text-xs font-bold text-gray-800 dark:text-gray-200 max-w-[65px] truncate">
+                        {user.fullName.split(" ")[0]}
+                      </span>
+                    </button>
+
+                    {/* Mobile Quick Account Sheet / Dropdown */}
+                    {mobileAccountMenuOpen && (
+                      <div
+                        className="fixed inset-x-3 top-16 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800 py-2 z-50 animate-in fade-in zoom-in-95"
+                        onClick={() => setMobileAccountMenuOpen(false)}
+                      >
+                        <div className="px-4 py-2.5 border-b border-gray-100 dark:border-slate-800 flex items-center gap-3">
+                          <UserAvatar src={user.avatarUrl} name={user.fullName} size="lg" />
+                          <div className="truncate flex-1">
+                            <p className="text-sm font-bold text-gray-900 dark:text-white truncate">
+                              {user.fullName}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate font-mono">
+                              {user.email}
+                            </p>
+                          </div>
+                        </div>
+
+                        <Link
+                          href="/account/orders"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
+                        >
+                          <Package className="w-4 h-4 text-blue-500" />
+                          My Orders &amp; Tracking
+                        </Link>
+                        <Link
+                          href="/account/profile"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
+                        >
+                          <User className="w-4 h-4 text-blue-500" />
+                          Account Profile &amp; Picture
+                        </Link>
+                        <Link
+                          href="/account/notifications"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
+                        >
+                          <Bell className="w-4 h-4 text-blue-500" />
+                          Notifications
+                        </Link>
+                        <Link
+                          href="/account/security"
+                          className="flex items-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800"
+                        >
+                          <Lock className="w-4 h-4 text-amber-500" />
+                          Change Password
+                        </Link>
+                        {user.role === "admin" && (
+                          <Link
+                            href="/admin"
+                            className="flex items-center gap-2.5 px-4 py-2.5 text-xs font-bold text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                          >
+                            <ShieldCheck className="w-4 h-4 text-purple-600" />
+                            Admin Console
+                          </Link>
+                        )}
+                        <div className="border-t border-gray-100 dark:border-slate-800 my-1" />
+                        <button
+                          type="button"
+                          onClick={logout}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-left"
+                        >
+                          <LogOut className="w-4 h-4 text-rose-500" />
+                          Sign Out
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <Link
+                    href="/login"
+                    className="p-1.5 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                    aria-label="Sign In"
+                    title="Sign In"
+                  >
+                    <User className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                  </Link>
+                )}
+              </div>
+
+              {/* Desktop User Account Controls (>= sm screens) */}
+              {authLoading ? (
+                /* State A — Loading placeholder */
+                <div
+                  className="hidden sm:flex items-center gap-2 px-2 py-1.5 rounded-xl animate-pulse"
+                  aria-label="Loading authentication"
+                >
+                  <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700/70 shrink-0" />
+                  <div className="w-14 h-4 rounded-md bg-slate-200 dark:bg-slate-700/70" />
+                </div>
+              ) : user ? (
+                /* State B — Authenticated Desktop Account Menu */
+                <div className="relative hidden sm:block" ref={desktopDropdownRef}>
                   <button
                     type="button"
                     onClick={() => setUserDropdownOpen(!userDropdownOpen)}
                     className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 border border-transparent hover:border-gray-200 dark:hover:border-slate-700 transition"
+                    aria-label={`Account menu for ${user.fullName}`}
+                    aria-expanded={userDropdownOpen}
                   >
-                    {user.avatarUrl ? (
-                      <img
-                        src={user.avatarUrl}
-                        alt={user.fullName}
-                        className="w-8 h-8 rounded-full object-cover border border-blue-500 shadow-sm"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold flex items-center justify-center text-xs border border-blue-200 dark:border-blue-800">
-                        {user.fullName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                    <UserAvatar
+                      src={user.avatarUrl}
+                      name={user.fullName}
+                      size="md"
+                    />
                     <span className="text-xs font-bold text-gray-800 dark:text-gray-200 max-w-[100px] truncate">
                       {user.fullName.split(" ")[0]}
                     </span>
@@ -214,17 +355,7 @@ export default function Navbar() {
                       onMouseLeave={() => setUserDropdownOpen(false)}
                     >
                       <div className="px-4 py-2 border-b border-gray-100 dark:border-slate-800 flex items-center gap-2.5">
-                        {user.avatarUrl ? (
-                          <img
-                            src={user.avatarUrl}
-                            alt=""
-                            className="w-8 h-8 rounded-full object-cover shrink-0 border"
-                          />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 font-bold flex items-center justify-center text-xs shrink-0">
-                            {user.fullName.charAt(0).toUpperCase()}
-                          </div>
-                        )}
+                        <UserAvatar src={user.avatarUrl} name={user.fullName} size="md" />
                         <div className="truncate">
                           <p className="text-xs font-bold text-gray-900 dark:text-white truncate">
                             {user.fullName}
@@ -299,6 +430,7 @@ export default function Navbar() {
                   )}
                 </div>
               ) : (
+                /* State C — Unauthenticated Desktop Actions */
                 <div className="hidden sm:flex items-center gap-1.5">
                   <Link
                     href="/login"
@@ -368,21 +500,19 @@ export default function Navbar() {
                 </button>
               </div>
 
-              {/* User Identity or Quick Login Box */}
+              {/* User Identity or Quick Login Box (State-Aware) */}
               <div className="p-4 bg-gray-50 dark:bg-slate-800/60 border-b border-gray-100 dark:border-slate-800">
-                {user ? (
+                {authLoading ? (
+                  <div className="flex items-center gap-3 animate-pulse" aria-label="Loading user profile">
+                    <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700/70 shrink-0" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="w-24 h-4 rounded bg-slate-200 dark:bg-slate-700/70" />
+                      <div className="w-32 h-3 rounded bg-slate-200 dark:bg-slate-700/70" />
+                    </div>
+                  </div>
+                ) : user ? (
                   <div className="flex items-center gap-3">
-                    {user.avatarUrl ? (
-                      <img
-                        src={user.avatarUrl}
-                        alt=""
-                        className="w-10 h-10 rounded-full object-cover border-2 border-blue-500 shadow-sm shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shrink-0 shadow">
-                        {user.fullName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                    <UserAvatar src={user.avatarUrl} name={user.fullName} size="lg" />
                     <div className="truncate flex-1">
                       <span className="font-bold text-sm text-gray-900 dark:text-white block truncate">
                         {user.fullName}
@@ -450,8 +580,8 @@ export default function Navbar() {
                   </div>
                 </div>
 
-                {/* Account & Orders Section */}
-                {user && (
+                {/* Account & Orders Section (when authenticated) */}
+                {!authLoading && user && (
                   <div>
                     <span className="px-3 text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 block mb-1">
                       Account &amp; Orders
@@ -545,7 +675,7 @@ export default function Navbar() {
                 </button>
               </div>
 
-              {user && (
+              {!authLoading && user && (
                 <button
                   type="button"
                   onClick={() => {

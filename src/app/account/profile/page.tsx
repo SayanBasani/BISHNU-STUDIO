@@ -54,6 +54,7 @@ export default function ProfilePage() {
   // Avatar Upload States
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarImgError, setAvatarImgError] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [removingAvatar, setRemovingAvatar] = useState(false);
   const [avatarMsg, setAvatarMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -155,7 +156,8 @@ export default function ProfilePage() {
       setAvatarMsg({ type: "success", text: "Profile picture updated successfully!" });
       setSelectedAvatarFile(null);
       setAvatarPreview(null);
-      await refreshUser();
+      setAvatarImgError(false);
+      await refreshUser(true);
     } catch (err: any) {
       setAvatarMsg({ type: "error", text: err?.message || "Failed to save profile picture." });
     } finally {
@@ -178,7 +180,8 @@ export default function ProfilePage() {
       setAvatarMsg({ type: "success", text: "Profile picture removed. Reverted to default avatar." });
       setSelectedAvatarFile(null);
       setAvatarPreview(null);
-      await refreshUser();
+      setAvatarImgError(false);
+      await refreshUser(true);
     } catch (err: any) {
       setAvatarMsg({ type: "error", text: err?.message || "Failed to remove avatar." });
     } finally {
@@ -478,10 +481,11 @@ export default function ProfilePage() {
               {/* Avatar Preview Ring */}
               <div className="relative group">
                 <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full overflow-hidden border-4 border-blue-500/20 dark:border-blue-500/40 shadow-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                  {currentDisplayAvatar ? (
+                  {currentDisplayAvatar && !avatarImgError ? (
                     <img
                       src={currentDisplayAvatar}
                       alt={user.fullName}
+                      onError={() => setAvatarImgError(true)}
                       className="w-full h-full object-cover"
                     />
                   ) : (

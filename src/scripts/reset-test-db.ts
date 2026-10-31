@@ -149,12 +149,31 @@ export async function resetTestDatabase(options: { force?: boolean } = {}) {
   const uploadsDir = path.resolve(process.cwd(), "uploads");
   if (fs.existsSync(uploadsDir)) {
     try {
+      // Find all avatar storage keys or file IDs currently referenced by active/preserved users
+      const activeUsers = await db.select({ avatarUrl: users.avatarUrl }).from(users);
+      const preservedAvatarFilenames = new Set<string>();
+      for (const u of activeUsers) {
+        if (u.avatarUrl) {
+          const match = u.avatarUrl.match(/\/api\/files\/download\/(fil_[a-zA-Z0-9-]+)/);
+          if (match) {
+            preservedAvatarFilenames.add(match[1]);
+          }
+        }
+      }
+
       const subdirs = ["private", "public/profiles", "public/products"];
       for (const sub of subdirs) {
         const fullSub = path.join(uploadsDir, sub);
         if (fs.existsSync(fullSub)) {
           const files = fs.readdirSync(fullSub);
           for (const f of files) {
+            // If in public/profiles, preserve files referenced by remaining active users
+            if (sub === "public/profiles") {
+              const isPreserved = Array.from(preservedAvatarFilenames).some((fid) => f.includes(fid));
+              if (isPreserved) {
+                continue;
+              }
+            }
             const filePath = path.join(fullSub, f);
             if (fs.statSync(filePath).isFile()) {
               fs.unlinkSync(filePath);
@@ -162,7 +181,7 @@ export async function resetTestDatabase(options: { force?: boolean } = {}) {
           }
         }
       }
-      console.log("  - Demo upload files purged from ./uploads/ directories.");
+      console.log("  - Demo upload files purged from ./uploads/ directories (preserved active avatars).");
     } catch (err: any) {
       console.warn("  - Warning cleaning files in uploads directory:", err?.message);
     }

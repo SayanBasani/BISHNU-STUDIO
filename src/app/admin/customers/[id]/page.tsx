@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { formatINR, formatDate } from "@/lib/utils";
+import UserAvatar from "@/components/ui/UserAvatar";
 import {
   User,
   Mail,
@@ -240,17 +241,12 @@ export default function AdminCustomerDetailPage() {
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            {customer.avatarUrl ? (
-              <img
-                src={customer.avatarUrl}
-                alt={customer.fullName}
-                className="w-12 h-12 rounded-full object-cover border border-slate-200 dark:border-slate-700"
-              />
-            ) : (
-              <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 flex items-center justify-center font-bold text-base uppercase">
-                {customer.fullName.charAt(0)}
-              </div>
-            )}
+            <UserAvatar
+              src={customer.avatarUrl}
+              name={customer.fullName}
+              size="lg"
+              className="border-slate-200 dark:border-slate-700 w-12 h-12 text-base"
+            />
             <div>
               <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                 {customer.fullName}

@@ -39,6 +39,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
+import UserAvatar from "@/components/ui/UserAvatar";
 
 export default function AdminLayout({
   children,
@@ -251,17 +252,13 @@ export default function AdminLayout({
           className={`flex items-center ${isCollapsed ? "justify-center" : "gap-2.5 min-w-0 pr-2"} group`}
           title={`Manage Admin Profile & Security (${user.fullName})`}
         >
-          {user.avatarUrl ? (
-            <img
-              src={user.avatarUrl}
-              alt={user.fullName}
-              className="w-8 h-8 rounded-full object-cover border border-purple-500/40 shrink-0 group-hover:ring-2 ring-purple-500 transition"
-            />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 flex items-center justify-center font-bold text-xs shrink-0 group-hover:bg-purple-200 dark:group-hover:bg-purple-900 transition">
-              {user.fullName.charAt(0).toUpperCase()}
-            </div>
-          )}
+          <UserAvatar
+            src={user.avatarUrl}
+            name={user.fullName}
+            size="md"
+            className="border-purple-500/40 group-hover:ring-2 ring-purple-500"
+            textClassName="bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
+          />
           {!isCollapsed && (
             <div className="truncate">
               <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white transition truncate">

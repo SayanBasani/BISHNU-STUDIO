@@ -57,6 +57,21 @@ const lastFetchTimestamp: Record<string, number> = {
   admin: 0,
 };
 
+export function clearNotificationCache(scope?: "customer" | "admin") {
+  if (scope) {
+    lastFetchedData[scope] = null;
+    lastFetchTimestamp[scope] = 0;
+    sharedInFlight[scope] = null;
+  } else {
+    lastFetchedData.customer = null;
+    lastFetchedData.admin = null;
+    lastFetchTimestamp.customer = 0;
+    lastFetchTimestamp.admin = 0;
+    sharedInFlight.customer = null;
+    sharedInFlight.admin = null;
+  }
+}
+
 async function executeSharedFetch(scope: "customer" | "admin"): Promise<{ items: NotificationItem[]; unreadCount: number } | null> {
   const now = Date.now();
   // Return cached result if fetched within 2 seconds
@@ -294,10 +309,23 @@ export default function NotificationBell({
     };
   }, [scope]);
 
+  // Reset cache and local state on user change or logout
+  const prevUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (user?.id !== prevUserIdRef.current) {
+      if (scope === "customer") {
+        clearNotificationCache("customer");
+        setNotifications([]);
+        setUnreadCount(0);
+      }
+      prevUserIdRef.current = user?.id || null;
+    }
+  }, [user?.id, scope]);
+
   // Fetch notifications via shared deduplicated poller
   const fetchNotifications = useCallback(async () => {
-    // Skip unauthenticated customer polling to eliminate 401 spam
-    if (scope === "customer" && !authLoading && !user) {
+    // Strictly skip customer polling while auth is loading or user is not logged in
+    if (scope === "customer" && (authLoading || !user)) {
       return;
     }
     await executeSharedFetch(scope);
@@ -305,8 +333,8 @@ export default function NotificationBell({
 
   // Visibility-aware background polling
   useEffect(() => {
-    // Skip unauthenticated customer polling
-    if (scope === "customer" && !authLoading && !user) {
+    // Strictly skip customer polling while auth is loading or user is not logged in
+    if (scope === "customer" && (authLoading || !user)) {
       return;
     }
 

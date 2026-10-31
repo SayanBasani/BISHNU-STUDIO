@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { formatINR, formatDate } from "@/lib/utils";
+import UserAvatar from "@/components/ui/UserAvatar";
 import {
   Users,
   Search,
@@ -248,17 +249,12 @@ export default function AdminCustomersPage() {
                       {/* Name & Avatar */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          {cust.avatarUrl ? (
-                            <img
-                              src={cust.avatarUrl}
-                              alt={cust.fullName}
-                              className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
-                            />
-                          ) : (
-                            <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 flex items-center justify-center font-bold text-xs uppercase">
-                              {cust.fullName.charAt(0)}
-                            </div>
-                          )}
+                          <UserAvatar
+                            src={cust.avatarUrl}
+                            name={cust.fullName}
+                            size="md"
+                            className="border-slate-200 dark:border-slate-700"
+                          />
                           <div>
                             <Link
                               href={`/admin/customers/${cust.id}`}

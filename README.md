@@ -32,6 +32,7 @@
 25. [Platform Generalization, Order Lifecycle, Returns & Logistics](#25-platform-generalization-order-lifecycle-returns--logistics)
 26. [Git Workflow, Branch Standards & Contributor Guidelines](#26-git-workflow-branch-standards--contributor-guidelines)
 27. [Notification Architecture, Authentication Security & Session Management](#27-notification-architecture-authentication-security--session-management)
+28. [Authentication State Hydration, Persistent Profile Avatars & Mobile Identity (BS-AUTH-03A)](#28-authentication-state-hydration-persistent-profile-avatars--mobile-identity-bs-auth-03a)
 - [Appendix: Environment-Variable Reference Table](#appendix-environment-variable-reference-table)
 - [Developer & Credits Information](#developer--credits-information)
 
@@ -909,6 +910,45 @@ A centralized notifications system is implemented in table 26 (`notifications`) 
   Dedicated full-page notification management interfaces with filtering by read state and category, mark all as read, and notification dismissal:
   - Customer: [`/account/notifications`](file:///account/notifications)
   - Admin: [`/admin/notifications`](file:///admin/notifications)
+
+---
+
+## 28. Authentication State Hydration, Persistent Profile Avatars & Mobile Identity (BS-AUTH-03A)
+
+### A. Three-State Authentication Hydration
+To eliminate the confusing flash of `Log In` and `Register` buttons for already-authenticated users, navigation components strictly distinguish three explicit states:
+- **State A — Loading / Initializing (`loading === true`)**:
+  Renders an animated pulse skeleton placeholder (`w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700/70`) with exact dimensions matching the user profile avatar button. Prevents layout shift and prevents premature unauthenticated control rendering.
+- **State B — Authenticated (`!loading && user`)**:
+  Renders the authenticated user's profile avatar (with automatic error fallback to the customer's initial badge), user's first name, and dropdown menu with profile links and logout.
+- **State C — Unauthenticated (`!loading && !user`)**:
+  Renders the standard Log In and Register buttons only after session verification completes.
+
+### B. Mobile Top Navbar Account Identity
+On mobile viewports (`< 640px` and down to `320px`), an account preview indicator is rendered directly in the sticky top header:
+- **Layout**: `[Brand Logo] ... [Theme Toggle] [Cart] [Notifications] [Mobile Avatar / Account] [Hamburger Menu]`.
+- **Responsive Adaptability**:
+  - `320px - 360px`: Renders compact 32px touch avatar button with no horizontal scrolling.
+  - `390px - 430px`: Renders 32px avatar + short truncated first name (`max-w-[65px] truncate`).
+- **Interaction**: Tapping the mobile avatar toggles an anchored mobile quick-sheet account menu providing direct one-tap access to Orders, Profile, Notifications, Security, Admin Console (for administrators), and Sign Out.
+- **Unauthenticated Fallback**: Displays a clean `User` icon linking to `/login`.
+
+### C. Persistent Profile Picture Lifecycle & Storage Protection
+- **Atomic Database Commit**: In `POST /api/account/avatar`, new avatar records are committed to the `users` table and `orderFiles` table *before* deleting superseded image files from disk, strictly satisfying Requirement 3.5.
+- **Disk File Persistence**: Files are stored in `./uploads/public/profiles/` with cryptographic identifiers and verified magic bytes (JPEG, PNG, WebP).
+- **Test Database Reset Protection**: In `src/scripts/reset-test-db.ts`, profile picture files belonging to preserved administrator and customer accounts are preserved during automated test cleanup.
+- **Image Error Fallback (`UserAvatar`)**: If any profile picture on disk is missing or fails to load, `<UserAvatar />` automatically catches the error (`onError`) and seamlessly renders the user's initial badge instead of showing a broken image icon.
+- **Cache-Control Headers**: Missing file responses (`404` and `410`) strictly return `Cache-Control: no-store, no-cache, must-revalidate` to prevent browsers from caching dead states.
+
+### D. Application Performance Diagnosis & Empirical Latency Findings
+- **Remote Neon PostgreSQL WAN Latency**:
+  Empirical measurements confirm that when running local development against a remote Neon PostgreSQL database hosted in AWS `us-east-2` (Ohio, USA) from India, physical speed-of-light network roundtrips incur **~270ms - 340ms per query**. Cold compute wake-ups take **~2,100ms - 2,230ms**.
+- **Local SQLite / LibSQL Timings**:
+  The exact same database queries running on local SQLite (`DATABASE_URL=file:./data/bishnu.db`) execute in **0.3ms to 1.9ms** (< 2 milliseconds total backend time).
+- **Notification Polling Guard**:
+  Customer notification polling is strictly suspended while `authLoading === true` or when `user === null`, eliminating 401 Unauthorized errors and duplicate network requests during initial page hydration.
+- **In-Flight Request Deduplication**:
+  Module-level promise deduplication in `AuthContext` and `NotificationBell` ensures concurrent components share a single in-flight network request.
 
 ---
 

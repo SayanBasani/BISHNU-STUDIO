@@ -28,7 +28,12 @@ export async function GET(
       return timer.finish(
         NextResponse.json(
           { error: "Requested document was not found." },
-          { status: 404 }
+          {
+            status: 404,
+            headers: {
+              "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
+          }
         )
       );
     }
@@ -74,7 +79,12 @@ export async function GET(
       return timer.finish(
         NextResponse.json(
           { error: "This document has been removed under privacy retention policies." },
-          { status: 410 }
+          {
+            status: 410,
+            headers: {
+              "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
+          }
         )
       );
     }
@@ -84,7 +94,12 @@ export async function GET(
       return timer.finish(
         NextResponse.json(
           { error: "File data not found on disk storage." },
-          { status: 404 }
+          {
+            status: 404,
+            headers: {
+              "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
+          }
         )
       );
     }

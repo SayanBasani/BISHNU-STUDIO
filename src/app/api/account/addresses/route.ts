@@ -5,6 +5,7 @@ import { userAddresses } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
+import { createRequestTimer } from "@/lib/perf";
 
 export const dynamic = "force-dynamic";
 
@@ -24,24 +25,34 @@ const addressSchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
+  const timer = createRequestTimer(req);
   try {
-    const auth = await getAuthSession();
+    const auth = await timer.measure("authentication", async () => {
+      return await getAuthSession();
+    });
+
     if (!auth?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return timer.finish(
+        NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      );
     }
 
-    const addresses = await db
-      .select()
-      .from(userAddresses)
-      .where(eq(userAddresses.userId, auth.user.id))
-      .orderBy(desc(userAddresses.isDefault), desc(userAddresses.createdAt));
+    const addresses = await timer.measure("database.user_addresses", async () => {
+      return await db
+        .select()
+        .from(userAddresses)
+        .where(eq(userAddresses.userId, auth.user.id))
+        .orderBy(desc(userAddresses.isDefault), desc(userAddresses.createdAt));
+    });
 
-    return NextResponse.json({ addresses });
+    return timer.finish(NextResponse.json({ addresses }));
   } catch (error: any) {
     console.error("Fetch addresses error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch saved addresses." },
-      { status: 500 }
+    return timer.finish(
+      NextResponse.json(
+        { error: "Failed to fetch saved addresses." },
+        { status: 500 }
+      )
     );
   }
 }

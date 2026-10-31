@@ -18,7 +18,7 @@ export interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  refreshUser: () => Promise<void>;
+  refreshUser: (force?: boolean) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -31,8 +31,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = async () => {
+  const refreshUser = async (force: boolean = false) => {
     try {
+      if (force) {
+        inFlightMePromise = null;
+      }
+
       if (!inFlightMePromise) {
         inFlightMePromise = fetch("/api/auth/me", { cache: "no-store" })
           .then(async (res) => {
@@ -66,11 +70,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
+      inFlightMePromise = null;
       await fetch("/api/auth/logout", { method: "POST" });
-      setUser(null);
-      window.location.href = "/";
     } catch (e) {
       console.error("Logout failed:", e);
+    } finally {
+      setUser(null);
+      setLoading(false);
+      window.location.href = "/";
     }
   };
 
