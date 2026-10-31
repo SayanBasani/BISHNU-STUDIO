@@ -22,12 +22,16 @@ import {
   HardDrive,
   Cpu,
   FileCheck2,
+  ShieldCheck,
+  Info,
 } from "lucide-react";
 
 interface DatabaseStatusData {
   controlPlane: {
     mode: "neon_primary" | "emergency_fallback" | "local_development" | "maintenance";
     activeProvider: "neon-postgres" | "sqlite-libsql";
+    authoritativeDatabase?: string;
+    writesEnabled?: boolean;
     fencingToken: number;
     lastSwitchedAt: number | null;
     lastSwitchedBy: string | null;
@@ -176,28 +180,28 @@ export default function AdminDatabaseSettingsPage() {
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
             <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-            Mode A: Neon Primary (Default)
+            Mode A: Neon Primary (Authoritative Production)
           </span>
         );
       case "emergency_fallback":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-            Mode B: Emergency Fallback
+            Mode B: Emergency Fallback (Outbox Queued)
           </span>
         );
       case "local_development":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
             <HardDrive className="w-3.5 h-3.5 text-blue-500" />
-            Mode C: Local Development
+            Mode C: Local Development (SQLite File)
           </span>
         );
       case "maintenance":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
             <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
-            Mode D: Maintenance (Read-Only)
+            Mode D: Maintenance (Read-Only / Writes Blocked)
           </span>
         );
       default:
@@ -222,7 +226,7 @@ export default function AdminDatabaseSettingsPage() {
             Database &amp; Storage Architecture
           </h1>
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-            Neon Serverless PostgreSQL Primary, SQLite / LibSQL Fallback &amp; Multi-Engine Synchronization
+            Neon Serverless PostgreSQL Primary (Default), SQLite / LibSQL Fallback &amp; Multi-Engine Synchronization
           </p>
         </div>
 
@@ -274,13 +278,25 @@ export default function AdminDatabaseSettingsPage() {
                 </span>
               </div>
               <div>{getModeBadge(data.controlPlane.mode)}</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-                Active Provider:{" "}
-                <span className="font-mono font-bold text-slate-900 dark:text-white">
-                  {data.controlPlane.activeProvider === "neon-postgres"
-                    ? "Neon PostgreSQL"
-                    : "SQLite / LibSQL"}
-                </span>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
+                <div className="flex justify-between items-center">
+                  <span>Authoritative DB:</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-white truncate max-w-[130px]" title={data.controlPlane.authoritativeDatabase}>
+                    {data.controlPlane.activeProvider === "neon-postgres" ? "Neon PostgreSQL" : "SQLite / LibSQL"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Write Status:</span>
+                  {data.controlPlane.writesEnabled !== false ? (
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded flex items-center gap-1">
+                      <Check className="w-2.5 h-2.5" /> Writes Enabled
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.5 rounded flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Writes Blocked
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -297,7 +313,7 @@ export default function AdminDatabaseSettingsPage() {
                   </span>
                 ) : data.health.primary.status === "unhealthy" ? (
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
-                    <XCircle className="w-4 h-4" /> Unhealthy / Unreachable
+                    <XCircle className="w-4 h-4" /> Unreachable: {data.health.primary.error || "Cannot connect"}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400">
@@ -306,7 +322,7 @@ export default function AdminDatabaseSettingsPage() {
                 )}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80 truncate">
-                Role: <span className="font-medium text-slate-700 dark:text-slate-300">Authoritative Production</span>
+                Role: <span className="font-medium text-slate-700 dark:text-slate-300">Default Production Engine</span>
               </div>
             </div>
 
@@ -337,7 +353,9 @@ export default function AdminDatabaseSettingsPage() {
                   }`}
                 >
                   {data.hostingSafety.isFallbackPersistentAndSafe
-                    ? "Persistent & Safe"
+                    ? "Remote LibSQL (Persistent)"
+                    : data.hostingSafety.isVercel
+                    ? "Ephemeral SQLite (Unsafe on Vercel)"
                     : "Local File (Dev Only)"}
                 </span>
               </div>
@@ -361,6 +379,27 @@ export default function AdminDatabaseSettingsPage() {
               </div>
             </div>
           </div>
+
+          {/* Last Switch Audit Banner */}
+          {data.controlPlane.lastSwitchedAt && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3 text-xs text-slate-600 dark:text-slate-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-400" />
+                <span>
+                  Last Provider Transition:{" "}
+                  <strong className="text-slate-900 dark:text-white">
+                    {new Date(data.controlPlane.lastSwitchedAt).toLocaleString("en-IN")}
+                  </strong>{" "}
+                  by <span className="font-mono text-purple-600 dark:text-purple-400">{data.controlPlane.lastSwitchedBy}</span>
+                </span>
+              </div>
+              {data.controlPlane.switchReason && (
+                <div className="italic text-slate-500 truncate max-w-md">
+                  &ldquo;{data.controlPlane.switchReason}&rdquo;
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Hosting Reality & Serverless Constraint Banner */}
           {data.hostingSafety.warning && (
@@ -512,13 +551,46 @@ export default function AdminDatabaseSettingsPage() {
                 <select
                   value={targetMode}
                   onChange={(e) => setTargetMode(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
                 >
-                  <option value="neon_primary">Mode A: Neon Primary (Authoritative Production)</option>
-                  <option value="emergency_fallback">Mode B: Emergency Fallback (Outbox Queued)</option>
-                  <option value="local_development">Mode C: Local Development (SQLite File)</option>
+                  <option value="neon_primary">Mode A: Neon Primary (Default Authoritative Production)</option>
+                  <option
+                    value="emergency_fallback"
+                    disabled={data?.hostingSafety.isVercel && !data.hostingSafety.isFallbackPersistentAndSafe}
+                  >
+                    Mode B: Emergency Fallback (Outbox Queued)
+                    {data?.hostingSafety.isVercel && !data.hostingSafety.isFallbackPersistentAndSafe ? " — [Blocked: Local file unsafe on Vercel]" : ""}
+                  </option>
+                  <option
+                    value="local_development"
+                    disabled={data?.hostingSafety.isProduction || data?.hostingSafety.isVercel}
+                  >
+                    Mode C: Local Development (SQLite File)
+                    {data?.hostingSafety.isProduction || data?.hostingSafety.isVercel ? " — [Blocked in Production]" : ""}
+                  </option>
                   <option value="maintenance">Mode D: Maintenance (Read-Only / Writes Blocked)</option>
                 </select>
+              </div>
+
+              {/* Mode Consequence Explanation Box */}
+              <div className="p-3.5 rounded-xl border space-y-1.5 bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
+                <div className="font-bold flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400">
+                  <Info className="w-3.5 h-3.5" /> Consequences of Selected Mode
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  {targetMode === "neon_primary" && (
+                    "Normal production mode. Neon Serverless PostgreSQL is the authoritative database for all reads and writes with multi-AZ failover and automated PITR."
+                  )}
+                  {targetMode === "emergency_fallback" && (
+                    "Emergency failover mode. New reads and writes use the verified fallback database. All mutations are queued in the durable outbox for later non-blind synchronization into Neon."
+                  )}
+                  {targetMode === "local_development" && (
+                    "Uses local file ./data/bishnu.db. Intended only for local machine development and offline test execution. Never permitted in production."
+                  )}
+                  {targetMode === "maintenance" && (
+                    "Disaster mitigation safe mode. Customer orders, checkout, payments, and refunds are immediately blocked on the backend with HTTP 503 to prevent unrecoverable data loss."
+                  )}
+                </p>
               </div>
 
               <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900/60 text-purple-900 dark:text-purple-300 space-y-1">

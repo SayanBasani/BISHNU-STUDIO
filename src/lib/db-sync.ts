@@ -17,6 +17,16 @@ import { getDatabaseProviderManager } from "./db-provider";
 import { eq, asc, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
 
+// Ensure Next environment variables are loaded in CLI/test contexts
+if (!process.env.NEON_DATABASE_URL && typeof window === "undefined") {
+  try {
+    const { loadEnvConfig } = require("@next/env");
+    loadEnvConfig(process.cwd());
+  } catch (e) {
+    // Ignore if @next/env unavailable
+  }
+}
+
 export interface SyncOutboxPayload {
   entityType: string;
   entityId: string;
@@ -138,15 +148,7 @@ export async function runSynchronizationToPrimary(params: {
   const manager = getDatabaseProviderManager();
   const state = manager.getControlPlaneState();
 
-  // 1. Pre-flight health check on Neon Primary
-  const primaryHealth = await manager.checkPrimaryHealth(true);
-  if (primaryHealth.status !== "healthy") {
-    throw new Error(
-      `SYNCHRONIZATION ABORTED: Target Neon PostgreSQL is unreachable: ${primaryHealth.error || "Connection timed out"}`
-    );
-  }
-
-  // 2. Fetch all pending outbox events ordered by sequence and creation time
+  // 1. Fetch all pending outbox events ordered by sequence and creation time
   const pendingEvents = await db
     .select()
     .from(dbSyncOutbox)
@@ -156,7 +158,7 @@ export async function runSynchronizationToPrimary(params: {
   const historyId = `synchist_${crypto.randomUUID()}`;
   const now = Date.now();
 
-  // If dry run, inspect and report without writes
+  // If dry run, inspect and report preview without executing writes
   if (dryRun) {
     return {
       historyId,
@@ -168,6 +170,14 @@ export async function runSynchronizationToPrimary(params: {
       status: "completed",
       details: { conflicts: [], failures: [] },
     };
+  }
+
+  // 2. Pre-flight health check on Neon Primary for live execution
+  const primaryHealth = await manager.checkPrimaryHealth(true);
+  if (primaryHealth.status !== "healthy") {
+    throw new Error(
+      `SYNCHRONIZATION ABORTED: Target Neon PostgreSQL is unreachable: ${primaryHealth.error || "Connection timed out"}`
+    );
   }
 
   // 3. Record synchronization attempt in db_sync_history

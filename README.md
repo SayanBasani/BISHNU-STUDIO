@@ -65,62 +65,85 @@
 
 ---
 
-## 2. Local SQLite versus Neon PostgreSQL
+## 2. Dual Database Architecture & Operating Modes (BS-FINAL-05)
 
-The Bishnu Studio repository supports two database engines through a unified abstraction layer in `src/db/index.ts`. Understanding how they differ prevents configuration mistakes:
+The Bishnu Studio platform implements a genuine, production-grade **Dual Database Architecture** managed through a central control plane (`src/lib/db-provider.ts`) and dynamic query dispatchers (`src/db/index.ts`, `src/db/schema.ts`).
 
-### A. Local SQLite / LibSQL Database (`./data/bishnu.db`)
-- **What it is**: A self-contained, single-file relational database stored directly on your development machine's local disk at `./data/bishnu.db`.
-- **Driver used**: `@libsql/client` coupled with `drizzle-orm/libsql`.
-- **Persistence**: Persists across local restarts on the developer's computer. However, it is ignored by Git (`.gitignore` excludes `/data/*.db`), so it is **never** committed to version control.
-- **Deployment Behavior**: When deployed to serverless hosts like Vercel, the filesystem is ephemeral and read-only. An SQLite file cannot be shared across multiple serverless function instances, and any writes to disk are lost when containers recycle.
-- **Synchronization**: SQLite records are **never** automatically copied or synced to Neon.
+### The Two Supported Database Engines
 
-### B. Neon PostgreSQL Database
-- **What it is**: A managed, cloud-hosted PostgreSQL 16 database running on AWS with separated compute and persistent NVMe storage.
-- **Driver used**: `@neondatabase/serverless` (Neon HTTP driver) coupled with `drizzle-orm/neon-http`.
-- **Serverless-Native**: Neon utilizes connection pooling (PgBouncer) and an HTTP query pipeline that allows thousands of concurrent serverless requests without exhausting PostgreSQL connection limits.
-- **Persistence**: All tables, customer accounts, orders, reviews, and payments are stored in persistent cloud storage with automatic continuous write-ahead logging (WAL) and point-in-time recovery (PITR).
-- **Scale-to-Zero**: Neon Free Tier automatically pauses compute endpoints after 5 minutes of inactivity to save resources. When an incoming request arrives, Neon wakes the compute in 500ms to 1.5s transparently.
+1. **Neon Serverless PostgreSQL (Primary Engine):**
+   - **Role:** Authoritative default database for all production traffic, real customers, orders, payments, refunds, and store metrics.
+   - **Driver:** `@neondatabase/serverless` (HTTP Driver) via `drizzle-orm/neon-http`.
+   - **Hosting Reality:** Cloud-hosted on AWS with separated compute and persistent NVMe storage. Supports connection pooling, multi-AZ high availability, and Point-In-Time Recovery (PITR).
+2. **SQLite / LibSQL (Standby & Local Engine):**
+   - **Role:** Local development database (`./data/bishnu.db`) and potential emergency fallback standby when paired with a persistent remote endpoint (`libsql://...` or Turso).
+   - **Driver:** `@libsql/client` via `drizzle-orm/libsql`.
+   - **Hosting Reality:** In local development, the file `./data/bishnu.db` is durable on your computer disk. In Vercel serverless functions, the local filesystem is ephemeral and isolated per micro-VM container.
 
 ---
 
-## 3. When Each Database is Used
+### The Four Database Operating Modes
 
-The application selects its database engine **exclusively** at startup based on the value of `process.env.DATABASE_URL` in `src/db/index.ts`:
-
-```ts
-// src/db/index.ts
-const dbUrl = process.env.DATABASE_URL || "file:./data/bishnu.db";
-export const isPostgres = dbUrl.startsWith("postgres://") || dbUrl.startsWith("postgresql://");
-```
-
-| Scenario | `DATABASE_URL` Value | Engine Selected | Driver Loaded |
+| Operating Mode | Authoritative Provider | Writes Status | Target Use Case & Safety Rules |
 | :--- | :--- | :--- | :--- |
-| **Default Local Run** (No variable set) | Undefined (defaults to `file:./data/bishnu.db`) | **Local SQLite** | `@libsql/client` |
-| **Explicit Offline Local** | `file:./data/bishnu.db` | **Local SQLite** | `@libsql/client` |
-| **Connected to Neon Test DB** | `postgresql://...` (contains Neon host) | **Neon PostgreSQL** | `@neondatabase/serverless` |
-| **Production on Vercel** | `postgresql://...-pooler...` | **Neon PostgreSQL** | `@neondatabase/serverless` |
-
-### Critical Production Serverless Protection
-If the application is deployed to Vercel in production and `DATABASE_URL` is either missing or set to a local `file:` URL, the application **immediately throws a fatal error at startup**:
-```
-CRITICAL CONFIGURATION ERROR: Vercel serverless environment detected with local SQLite file URL.
-A persistent Neon PostgreSQL database URL (e.g. postgresql://...) must be provided in production...
-```
-This fails fast and prevents the website from silently writing orders or payments to an ephemeral SQLite file on Vercel.
+| **Mode A: Neon Primary (DEFAULT)** | Neon PostgreSQL (`@neondatabase/serverless`) | **Writes Active** | **Normal Production Operation.** All customer storefront reads, checkout writes, payment claims, and admin updates execute exclusively against Neon. |
+| **Mode B: Emergency Fallback** | Persistent Standby (`@libsql/client`) | **Outbox Queued** | **Emergency Outage Mitigation.** Activated only when primary Neon has an extended outage and a persistent remote LibSQL/Turso endpoint is verified. All new mutations are durably recorded to `db_sync_outbox` for later non-blind synchronization. |
+| **Mode C: Local Development** | Local SQLite (`file:./data/bishnu.db`) | **Writes Active** | **Local Machine Development & Offline Testing.** Uses local file. **Strictly prohibited in production/Vercel deployment** to prevent silent data loss across ephemeral containers. |
+| **Mode D: Maintenance (Read-Only)** | Active Provider (Read-Only) | **Writes Blocked** | **Disaster & Maintenance Safety.** All data-mutating operations (`insert`, `update`, `delete`, `transaction`) are blocked on the backend with `MaintenanceModeError` (HTTP 503). Customer reads remain available where safe. |
 
 ---
 
-## 4. Whether Data is Shared, Copied or Synchronized
+## 3. Central Provider Manager, Fencing Tokens & Vercel Safety
 
-> [!IMPORTANT]
-> **THERE IS ZERO AUTOMATIC SYNCHRONIZATION BETWEEN SQLITE AND NEON.**
->
-> 1. **No Dual Writing**: The application creates exactly **one** database client instance (`db`) at startup. Every insert, update, select, and delete executes against that single active database.
-> 2. **No Split Reads/Writes**: The application never reads from SQLite while writing to Neon, or vice versa.
-> 3. **No Background Replication**: Changes made in local SQLite are **not** forwarded to Neon. Changes made in Neon are **not** pulled down to SQLite.
-> 4. **One-Time Migration Tool**: The script `scripts/migrate-sqlite-to-neon.ts` is an isolated command-line utility. It reads the local SQLite database and performs a one-time copy to Neon. Once it finishes, the two databases remain completely independent.
+### A. Central Provider Dispatcher (No Ad-Hoc Runtime Mutation)
+Database selection is **never** handled via ad-hoc `process.env.DATABASE_URL` mutations inside individual API routes. Instead:
+- `DatabaseProviderManager` (`src/lib/db-provider.ts`) serves as the single source of truth.
+- `db` in `src/db/index.ts` is a dynamic Proxy that routes queries directly to the active provider instance for that query.
+- All 28 table models in `src/db/schema.ts` are dynamic Proxies that bind to PostgreSQL or SQLite table definitions dynamically.
+
+### B. Fencing Token Protection
+To prevent split-brain writes across concurrent serverless instances during a mode switch:
+- The control plane maintains a monotonically increasing integer (`fencingToken`).
+- Every administrative mode switch increments `fencingToken` by +1 (e.g. Token #1 &rarr; Token #2).
+- Fallback mutations capture the active fencing token in `db_sync_outbox`.
+- Outdated requests or stale instances with older fencing tokens are rejected.
+
+### C. Vercel Serverless Hosting Reality Check
+> [!WARNING]
+> **Ephemeral Filesystem Boundary on Vercel**  
+> Vercel executes Next.js API routes in serverless micro-VM containers (AWS Lambda micro-instances). Each micro-VM has an isolated, non-shared `/tmp` directory that is destroyed upon cold start or container recycle.
+> 
+> Therefore, **a local SQLite file (`file:./data/bishnu.db`) is strictly UNSAFE for production fallback on Vercel**. The Provider Manager enforces this check: attempting to switch to Mode B in production while using a `file:` URL is **strictly blocked** by the backend. To use Mode B on Vercel, a persistent remote LibSQL endpoint (`libsql://...` with auth token) must be configured in `FALLBACK_DATABASE_URL`.
+
+---
+
+## 4. Durable Outbox Synchronization, Conflict Resolution & Planned Migration
+
+### A. Durable Outbox Pattern (`db_sync_outbox`)
+When operating in Mode B (Emergency Fallback):
+- Every successful mutation is saved to `db_sync_outbox` with unique event ID, `entityType`, `entityId`, `operation` (INSERT, UPDATE, DELETE), sanitized `payloadJson` (passwords and session tokens stripped), and `fencingToken`.
+
+### B. Recovery & Synchronization to Neon (`db_sync_history`)
+When Neon PostgreSQL becomes healthy again:
+1. **Pre-flight Health Check:** Verifies Neon connectivity before attempting synchronization.
+2. **Deterministic Entity Dependency Replay:** Replays mutations in foreign-key order (`users` &rarr; `categories` &rarr; `products` &rarr; `orders` &rarr; `order_items` &rarr; `payments` &rarr; `returns` &rarr; `notifications`).
+3. **Non-Blind Conflict Detection:**
+   - If an `INSERT` target already exists with different data, flagged as `status: 'conflict'`.
+   - If an `UPDATE` target was modified in Neon more recently than the fallback mutation, flagged as `status: 'conflict'`.
+   - Never blindly applies "last write wins" on financial or inventory records.
+   - Preserves verified payment statuses (never downgrades an order already paid in Neon).
+4. **Audit History:** Records total events, synced count, conflict count, and duration in `db_sync_history`.
+5. **Mode Restoration:** Administrator reviews the reconciliation summary and switches back to Mode A.
+
+### C. Planned Cost-Based Provider Migration (Future Migration Guide)
+If migrating from Neon PostgreSQL to a self-hosted PostgreSQL or secondary provider for cost optimization:
+1. **Never use emergency failover for a planned migration.**
+2. Set up the target database (e.g. RDS, Supabase, self-hosted Postgres).
+3. Apply migrations: `npx drizzle-kit migrate` against the target database.
+4. Execute `scripts/migrate-sqlite-to-neon.ts --target-url=postgresql://...` to copy records in dependency order with foreign key and boolean type casting.
+5. Verify row counts and reconciliation totals for orders, payments, refunds, and users.
+6. Perform a controlled cutover during an off-peak maintenance window.
+7. Retain a recoverable backup of the original database for at least 30 days before decommissioning.
 
 ---
 

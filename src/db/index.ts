@@ -23,7 +23,7 @@ const dbProxy = new Proxy({} as any, {
     if (typeof value === "function") {
       return function (...args: any[]) {
         // Enforce maintenance mode write-blocking
-        if (prop === "insert" || prop === "update" || prop === "delete") {
+        if (prop === "insert" || prop === "update" || prop === "delete" || prop === "transaction") {
           manager.assertWritableDatabase();
         }
         return value.apply(activeDb, args);

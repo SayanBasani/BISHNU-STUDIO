@@ -40,6 +40,8 @@ export type ActiveDatabaseProvider = "neon-postgres" | "sqlite-libsql";
 export interface DatabaseControlPlaneState {
   mode: DatabaseOperatingMode;
   activeProvider: ActiveDatabaseProvider;
+  authoritativeDatabase: string;
+  writesEnabled: boolean;
   fencingToken: number;
   lastSwitchedAt: number | null;
   lastSwitchedBy: string | null;
@@ -173,8 +175,8 @@ export class DatabaseProviderManager {
     }
 
     // Determine initial default mode:
-    // In production or Vercel: neon_primary
-    // In local development: local_development (unless file specified otherwise)
+    // In production or Vercel: neon_primary is the mandatory default
+    // In local development: local_development (unless file or env specified otherwise)
     const defaultMode: DatabaseOperatingMode =
       isProduction || isVercel ? "neon_primary" : "local_development";
 
@@ -183,10 +185,18 @@ export class DatabaseProviderManager {
       stateFromFile?.mode ||
       defaultMode;
 
-    // Safety guard: if resolvedMode is emergency_fallback but storage is unsafe on Vercel, revert to neon_primary or maintenance
+    // Strict Production Guard: Mode C (Local Development / SQLite) is prohibited in production
+    if ((isProduction || isVercel) && resolvedMode === "local_development") {
+      console.warn(
+        "[Database Provider Manager] CRITICAL: Attempted to run local_development SQLite mode in production/Vercel. Enforcing Neon Primary mode."
+      );
+      resolvedMode = "neon_primary";
+    }
+
+    // Safety guard: if resolvedMode is emergency_fallback but storage is unsafe on Vercel, revert to maintenance
     const safety = this.getHostingSafetyAssessment();
     if (resolvedMode === "emergency_fallback" && !safety.isFallbackPersistentAndSafe && (isVercel || isProduction)) {
-      console.warn("[Database Provider Manager] Emergency fallback requested on Vercel without persistent remote storage. Enforcing safe mode.");
+      console.warn("[Database Provider Manager] Emergency fallback requested on Vercel without persistent remote storage. Enforcing safe maintenance mode.");
       resolvedMode = "maintenance";
     }
 
@@ -197,9 +207,22 @@ export class DatabaseProviderManager {
         ? (stateFromFile?.activeProvider || (isProduction ? "neon-postgres" : "sqlite-libsql"))
         : "sqlite-libsql";
 
+    const authoritativeDatabase =
+      resolvedMode === "neon_primary"
+        ? "Neon Serverless PostgreSQL (Authoritative Production)"
+        : resolvedMode === "emergency_fallback"
+        ? "Persistent LibSQL Fallback (Outbox Queued)"
+        : resolvedMode === "local_development"
+        ? "Local SQLite (data/bishnu.db)"
+        : "Read-Only Protected Standby (Writes Blocked)";
+
+    const writesEnabled = resolvedMode !== "maintenance";
+
     cachedControlPlane = {
       mode: resolvedMode,
       activeProvider,
+      authoritativeDatabase,
+      writesEnabled,
       fencingToken: stateFromFile?.fencingToken || 1,
       lastSwitchedAt: stateFromFile?.lastSwitchedAt || null,
       lastSwitchedBy: stateFromFile?.lastSwitchedBy || null,
@@ -282,12 +305,20 @@ export class DatabaseProviderManager {
       throw new Error("A clear administrative justification (at least 5 characters) is required to switch database operating mode.");
     }
 
+    const safety = this.getHostingSafetyAssessment();
+
+    // Safety check: Prohibit Mode C in production
+    if ((safety.isProduction || safety.isVercel) && targetMode === "local_development") {
+      throw new Error(
+        "SWITCH REJECTED: Mode C (Local Development / SQLite) is prohibited in production and Vercel serverless environments. " +
+        "Real customer and business data must remain in Neon Serverless PostgreSQL or a persistent remote standby."
+      );
+    }
+
     const current = this.getControlPlaneState();
     if (current.mode === targetMode) {
       return { success: true, state: current, message: `Operating mode is already ${targetMode}.` };
     }
-
-    const safety = this.getHostingSafetyAssessment();
 
     // Safety checks for target mode
     if (targetMode === "emergency_fallback") {
@@ -321,12 +352,25 @@ export class DatabaseProviderManager {
       newProvider = "sqlite-libsql";
     }
 
+    const authoritativeDatabase =
+      targetMode === "neon_primary"
+        ? "Neon Serverless PostgreSQL (Authoritative Production)"
+        : targetMode === "emergency_fallback"
+        ? "Persistent LibSQL Fallback (Outbox Queued)"
+        : targetMode === "local_development"
+        ? "Local SQLite (data/bishnu.db)"
+        : "Read-Only Protected Standby (Writes Blocked)";
+
+    const writesEnabled = targetMode !== "maintenance";
+
     // Increment fencing token monotonically to fence out any stale writes
     const newFencingToken = current.fencingToken + 1;
 
     const updatedState = this.saveControlPlaneState({
       mode: targetMode,
       activeProvider: newProvider,
+      authoritativeDatabase,
+      writesEnabled,
       fencingToken: newFencingToken,
       lastSwitchedAt: Date.now(),
       lastSwitchedBy: adminUserId,

@@ -32,12 +32,21 @@ This document establishes permanent operating rules, quality standards, and Git 
 
 1. **Production-Grade Implementation**:
    Implement genuine, complete full-stack logic. Never leave placeholder stubs, mock data where real database persistence is expected, or incomplete "TODO" comments in critical paths.
-2. **Dual-Database Parity**:
-   Any database schema modification must be mirrored across both:
-   - `src/db/schema.sqlite.ts` (SQLite / LibSQL)
-   - `src/db/schema.pg.ts` (PostgreSQL / Neon)
-   - Exported through `src/db/schema.ts`
-   - Reflected in data migrators (`scripts/migrate-sqlite-to-neon.ts`) and reset utilities (`src/scripts/reset-test-db.ts`).
+2. **Permanent Dual-Database Parity Protocol (Neon-First & Complete Parity)**:
+   Every existing and future feature MUST be designed and implemented for both database engines from inception. No feature may work only on Neon while silently failing on SQLite, or vice versa:
+   - **Schema Parity Checklist**:
+     1. Add schema definition to `src/db/schema.sqlite.ts` using `drizzle-orm/sqlite-core`.
+     2. Add identical schema definition to `src/db/schema.pg.ts` using `drizzle-orm/pg-core`.
+     3. Export dynamic proxy in `src/db/schema.ts` (`createTableProxy(pgTable, sqTable)`).
+     4. Generate and verify SQLite migration in `src/db/migrations/`.
+     5. Generate and verify PostgreSQL migration in `src/db/migrations-pg/`.
+     6. Update `scripts/migrate-sqlite-to-neon.ts` with table dependency order.
+     7. Update test reset scripts (`src/scripts/reset-test-db.ts`).
+     8. Verify foreign keys, indexes, uniqueness, and column defaults.
+     9. Test queries with both drivers (`@libsql/client` and `@neondatabase/serverless`).
+     10. Run automated tests verifying both engines.
+   - **Application-Level Compatibility**: Ensure query syntax, joins, transactions, JSON serialization, timestamp handling (`Date.now()` vs `now()`), and boolean flags execute identically under both drivers.
+   - **Production Default**: Neon PostgreSQL is the authoritative production database. Mode C (Local Development / SQLite) is strictly prohibited from running in production or on Vercel.
 3. **Confidentiality & Information Barriers**:
    - `orders.internalNotes` and `orderReturns.internalNotes` are confidential internal staff remarks. They must never be leaked to customer-facing APIs (`isAdmin ? record.internalNotes : undefined`).
    - Customer-visible fulfillment instructions belong in `customerFulfillmentNote` or `customerInstructions`.

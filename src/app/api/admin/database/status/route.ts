@@ -34,6 +34,8 @@ export async function GET(req: NextRequest) {
       controlPlane: {
         mode: controlPlane.mode,
         activeProvider: controlPlane.activeProvider,
+        authoritativeDatabase: controlPlane.authoritativeDatabase,
+        writesEnabled: controlPlane.writesEnabled,
         fencingToken: controlPlane.fencingToken,
         lastSwitchedAt: controlPlane.lastSwitchedAt,
         lastSwitchedBy: controlPlane.lastSwitchedBy,
