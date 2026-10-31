@@ -71,12 +71,23 @@ export async function POST(
       })
       .where(eq(orderReturns.id, id));
 
+    const orderRows = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.id, ret.orderId))
+      .limit(1);
+    const order = orderRows[0];
+    const orderStatus = order?.orderStatus || "completed";
+    const paymentStatus = order?.paymentStatus || "refunded";
+
     await recordOrderEvent({
       orderId: ret.orderId,
-      previousStatus: "completed",
-      newStatus: "completed",
-      previousPaymentStatus: "refunded",
-      newPaymentStatus: "refunded",
+      eventType: "refund_disputed",
+      returnId: id,
+      previousStatus: orderStatus,
+      newStatus: orderStatus,
+      previousPaymentStatus: paymentStatus,
+      newPaymentStatus: paymentStatus,
       changedByUserId: auth.user.id,
       actorRole: isAdmin ? "admin" : "customer",
       customerMessage: `Dispute opened for Return #${ret.returnReference} refund. Our finance team is reviewing your report.`,

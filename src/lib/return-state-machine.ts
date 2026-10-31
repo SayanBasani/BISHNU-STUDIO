@@ -113,6 +113,7 @@ export const REFUND_STATUSES = [
   "payout_initiated",
   "paid",
   "failed",
+  "payout_failed",
   "disputed",
   "cancelled",
 ] as const;
@@ -124,12 +125,13 @@ export const VALID_REFUND_TRANSITIONS: Record<RefundStatus, RefundStatus[]> = {
   not_eligible: ["pending_review"],
   pending_review: ["approved", "not_eligible", "cancelled"],
   approved: ["awaiting_payout", "pending_payout", "payout_recorded", "payout_initiated", "cancelled"],
-  awaiting_payout: ["payout_recorded", "payout_initiated", "paid", "failed", "cancelled"],
-  pending_payout: ["payout_recorded", "payout_initiated", "paid", "failed", "cancelled"],
-  payout_recorded: ["paid", "failed", "disputed"],
-  payout_initiated: ["paid", "failed", "disputed"],
+  awaiting_payout: ["payout_recorded", "payout_initiated", "paid", "failed", "payout_failed", "cancelled"],
+  pending_payout: ["payout_recorded", "payout_initiated", "paid", "failed", "payout_failed", "cancelled"],
+  payout_recorded: ["paid", "failed", "payout_failed", "disputed"],
+  payout_initiated: ["paid", "failed", "payout_failed", "disputed"],
   paid: ["disputed"], // Guard: Once paid, can only transition to disputed if customer raises issue
-  failed: ["awaiting_payout", "pending_payout", "cancelled"],
+  failed: ["awaiting_payout", "pending_payout", "payout_initiated", "cancelled"],
+  payout_failed: ["awaiting_payout", "pending_payout", "payout_initiated", "cancelled"],
   disputed: ["pending_review", "awaiting_payout", "pending_payout", "paid", "cancelled"],
   cancelled: [], // Terminal
 };
@@ -186,13 +188,166 @@ export const REFUND_STATUS_LABELS: Record<string, string> = {
   approved: "Approved for Disbursement",
   awaiting_payout: "Awaiting Payout Execution",
   pending_payout: "Awaiting Payout Execution",
-  payout_recorded: "Payout Initiated / In Progress",
-  payout_initiated: "Payout Initiated / In Progress",
+  payout_recorded: "Refund Transfer Initiated",
+  payout_initiated: "Refund Transfer Initiated",
   paid: "Refund Paid & Settled",
-  failed: "Payout Transfer Failed",
-  disputed: "Disputed by Customer",
+  failed: "Refund Transfer Failed",
+  payout_failed: "Refund Transfer Failed",
+  disputed: "Refund Under Dispute",
   cancelled: "Refund Cancelled",
 };
+
+export const CUSTOMER_REFUND_STATUS_LABELS: Record<string, string> = {
+  not_eligible: "Not Eligible",
+  pending_review: "Pending Review",
+  approved: "Refund approved",
+  awaiting_payout: "Refund approved",
+  pending_payout: "Refund approved",
+  payout_recorded: "Refund transfer initiated",
+  payout_initiated: "Refund transfer initiated",
+  paid: "Refund sent successfully",
+  failed: "Refund transfer failed",
+  payout_failed: "Refund transfer failed",
+  disputed: "Refund under dispute",
+  cancelled: "Refund cancelled",
+};
+
+export const RETURN_EVENT_TYPES = {
+  // Order Events
+  ORDER_PLACED: "order_placed",
+  PAYMENT_STATUS_UPDATED: "payment_status_updated",
+  ORDER_CONFIRMED: "order_confirmed",
+  FULFILLMENT_STATUS_UPDATED: "fulfillment_status_updated",
+  ORDER_DISPATCHED: "order_dispatched",
+  OUT_FOR_DELIVERY: "out_for_delivery",
+  ORDER_DELIVERED: "order_delivered",
+  CUSTOMER_COLLECTED_ORDER: "customer_collected_order",
+  ORDER_CANCELLED: "order_cancelled",
+  // Return / Exchange Events
+  RETURN_REQUESTED: "return_requested",
+  RETURN_UNDER_REVIEW: "return_under_review",
+  RETURN_APPROVED: "return_approved",
+  RETURN_REJECTED: "return_rejected",
+  RETURN_PICKUP_SCHEDULED: "return_pickup_scheduled",
+  RETURN_ITEM_COLLECTED: "return_item_collected",
+  RETURN_ITEM_RECEIVED: "return_item_received",
+  RETURN_INSPECTION_STARTED: "return_inspection_started",
+  RETURN_INSPECTION_PASSED: "return_inspection_passed",
+  RETURN_INSPECTION_FAILED: "return_inspection_failed",
+  RETURN_COMPLETED: "return_completed",
+  EXCHANGE_REQUESTED: "exchange_requested",
+  EXCHANGE_APPROVED: "exchange_approved",
+  EXCHANGE_REJECTED: "exchange_rejected",
+  REPLACEMENT_ORDER_CREATED: "replacement_order_created",
+  REPLACEMENT_DISPATCHED: "replacement_dispatched",
+  REPLACEMENT_DELIVERED: "replacement_delivered",
+  EXCHANGE_COMPLETED: "exchange_completed",
+  // Refund Settlement Events
+  REFUND_REQUESTED: "refund_requested",
+  REFUND_APPROVED: "refund_approved",
+  REFUND_PAYOUT_INITIATED: "refund_payout_initiated",
+  REFUND_PAID: "refund_paid",
+  REFUND_PAYOUT_FAILED: "refund_payout_failed",
+  REFUND_DISPUTED: "refund_disputed",
+  REFUND_DISPUTE_RESOLVED: "refund_dispute_resolved",
+  REFUND_CANCELLED: "refund_cancelled",
+  // Case Events
+  CASE_CLOSED: "case_closed",
+  CASE_ARCHIVED: "case_archived",
+} as const;
+
+export type ReturnEventType = typeof RETURN_EVENT_TYPES[keyof typeof RETURN_EVENT_TYPES];
+
+/**
+ * Distinguishes Physical Return Completion vs Refund Settlement vs Case Closure vs Archival
+ */
+export function evaluateReturnCaseClosure(ret: {
+  status: string;
+  refundStatus?: string | null;
+  requestedResolution?: string | null;
+  exchangeStatus?: string | null;
+  isArchived?: boolean;
+}): {
+  isPhysicalCompleted: boolean;
+  isRefundSettled: boolean;
+  isExchangeCompleted: boolean;
+  isCaseClosed: boolean;
+  canArchive: boolean;
+  caseStatusLabel: string;
+  archiveStatusLabel: string;
+  closureReason: string;
+} {
+  const isPhysicalCompleted =
+    ret.status === "return_completed" ||
+    ret.status === "completed" ||
+    ret.status === "rejected" ||
+    ret.status === "cancelled";
+
+  const isRefundResolution = ret.requestedResolution !== "exchange";
+  const refundStatus = ret.refundStatus || "pending_review";
+  const exchangeStatus = ret.exchangeStatus || "requested";
+
+  const isRefundSettled =
+    refundStatus === "paid" ||
+    refundStatus === "not_eligible" ||
+    refundStatus === "cancelled";
+
+  const isExchangeCompleted =
+    exchangeStatus === "completed" ||
+    exchangeStatus === "rejected" ||
+    exchangeStatus === "cancelled";
+
+  let isCaseClosed = false;
+  let closureReason = "";
+
+  if (ret.status === "rejected" || ret.status === "cancelled") {
+    isCaseClosed = true;
+    closureReason = `Return case finalized (${ret.status}).`;
+  } else if (isRefundResolution) {
+    if (isPhysicalCompleted && isRefundSettled) {
+      isCaseClosed = true;
+      closureReason = "Physical return received & inspected, and refund payout settled.";
+    } else if (isPhysicalCompleted && !isRefundSettled) {
+      isCaseClosed = false;
+      closureReason = "Physical return completed, but refund payout remains pending.";
+    } else {
+      isCaseClosed = false;
+      closureReason = "Return lifecycle in progress.";
+    }
+  } else {
+    // Exchange resolution
+    if (isPhysicalCompleted && isExchangeCompleted) {
+      isCaseClosed = true;
+      closureReason = "Returned item inspected and replacement order fulfillment completed.";
+    } else {
+      isCaseClosed = false;
+      closureReason = "Exchange or replacement fulfillment still in progress.";
+    }
+  }
+
+  // Can archive if case is closed, OR if physical return is complete (with clear pending financial status)
+  const canArchive = isCaseClosed || isPhysicalCompleted;
+
+  let caseStatusLabel = "Open / In Progress";
+  if (isCaseClosed) {
+    caseStatusLabel = "Case Closed & Resolved";
+  } else if (isPhysicalCompleted && !isRefundSettled) {
+    caseStatusLabel = "Open / Awaiting Financial Resolution";
+  }
+
+  const archiveStatusLabel = ret.isArchived ? "Archived" : "Active";
+
+  return {
+    isPhysicalCompleted,
+    isRefundSettled,
+    isExchangeCompleted,
+    isCaseClosed,
+    canArchive,
+    caseStatusLabel,
+    archiveStatusLabel,
+    closureReason,
+  };
+}
 
 export const EXCHANGE_STATUS_LABELS: Record<string, string> = {
   requested: "Exchange Requested",

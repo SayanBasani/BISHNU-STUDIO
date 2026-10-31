@@ -30,6 +30,12 @@ import {
   Building,
   Eye,
   FileCheck,
+  Archive,
+  CheckCircle,
+  ShieldAlert,
+  ArrowUpRight,
+  Ban,
+  RefreshCw,
 } from "lucide-react";
 
 export default function AdminReturnDetailPage() {
@@ -78,6 +84,20 @@ export default function AdminReturnDetailPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // Modals & Explicit Settlement Action States
+  const [isConfirmPayoutOpen, setIsConfirmPayoutOpen] = useState(false);
+  const [modalPayoutAmount, setModalPayoutAmount] = useState<number>(0);
+  const [modalPayoutMethod, setModalPayoutMethod] = useState("upi");
+  const [modalPayoutRef, setModalPayoutRef] = useState("");
+  const [modalPayoutProof, setModalPayoutProof] = useState("");
+  const [modalPayoutTimestamp, setModalPayoutTimestamp] = useState("");
+  const [modalConfirmChecked, setModalConfirmChecked] = useState(false);
+
+  const [isPayoutFailedOpen, setIsPayoutFailedOpen] = useState(false);
+  const [payoutFailureReasonInput, setPayoutFailureReasonInput] = useState("");
+
+  const [actionLoading, setActionLoading] = useState(false);
+
   useEffect(() => {
     if (returnId) fetchReturnDetail();
   }, [returnId]);
@@ -118,10 +138,160 @@ export default function AdminReturnDetailPage() {
       setExchangePriceDifference(ret.exchangePriceDifference || 0);
       setExchangeNotes(ret.exchangeNotes || "");
       setRestockInventory(false);
+
+      // Preload modal inputs
+      setModalPayoutAmount(ret.refundAmount || 0);
+      setModalPayoutMethod(ret.refundMethod || "upi");
+      setModalPayoutRef(ret.refundTransactionReference || "");
+      setModalPayoutProof(ret.refundProofUrl || "");
+      setModalPayoutTimestamp(new Date().toISOString().slice(0, 16));
     } catch (err: any) {
       setError(err?.message || "Error loading return");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApproveRefund = async () => {
+    if (!confirm("Are you sure you want to approve this refund request?")) return;
+    setActionLoading(true);
+    setFormError(null);
+    try {
+      const res = await fetch(`/api/returns/${returnId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve_refund" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to approve refund");
+      setSaveSuccess("Refund approved successfully!");
+      await fetchReturnDetail();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRecordPayoutInitiated = async () => {
+    if (!confirm("Record that payout transfer has been initiated in your banking portal? Note: This records that transfer was initiated, not yet paid.")) return;
+    setActionLoading(true);
+    setFormError(null);
+    try {
+      const res = await fetch(`/api/returns/${returnId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "record_payout_initiated",
+          refundMethod,
+          refundTransactionReference: refundTransactionReference.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to record payout initiation");
+      setSaveSuccess("Payout initiation recorded. Payout status marked as in-transfer.");
+      await fetchReturnDetail();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmPayoutCompleted = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalConfirmChecked) {
+      setFormError("You must check the confirmation checkbox to explicitly confirm refund payout completion.");
+      return;
+    }
+    if (!modalPayoutRef.trim()) {
+      setFormError("A verified Bank UTR, UPI reference, or Cash voucher number is mandatory.");
+      return;
+    }
+    if (!modalPayoutProof.trim()) {
+      setFormError("A proof receipt URL or screenshot is mandatory to verify payout completion.");
+      return;
+    }
+
+    setActionLoading(true);
+    setFormError(null);
+    try {
+      const res = await fetch(`/api/returns/${returnId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "confirm_payout_completed",
+          refundAmount: Number(modalPayoutAmount) || returnRecord.refundAmount,
+          refundMethod: modalPayoutMethod,
+          refundTransactionReference: modalPayoutRef.trim(),
+          refundProofUrl: modalPayoutProof.trim(),
+          payoutTimestamp: modalPayoutTimestamp ? new Date(modalPayoutTimestamp).getTime() : Date.now(),
+          confirmationChecked: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to confirm refund payout");
+      setSaveSuccess("Refund payout confirmed and settled as Paid!");
+      setIsConfirmPayoutOpen(false);
+      await fetchReturnDetail();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRecordPayoutFailed = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!payoutFailureReasonInput.trim()) {
+      setFormError("A clear failure reason is mandatory.");
+      return;
+    }
+
+    setActionLoading(true);
+    setFormError(null);
+    try {
+      const res = await fetch(`/api/returns/${returnId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "record_payout_failed",
+          payoutFailureReason: payoutFailureReasonInput.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to record payout failure");
+      setSaveSuccess("Payout failure recorded. Refund kept unpaid for retry.");
+      setIsPayoutFailedOpen(false);
+      await fetchReturnDetail();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleToggleArchive = async () => {
+    const isCurrentlyArchived = Boolean(returnRecord.isArchived);
+    const targetAction = isCurrentlyArchived ? "unarchive_case" : "archive_case";
+    if (!confirm(isCurrentlyArchived ? "Unarchive this return case?" : "Archive this return case? This preserves all evidence and marks the case archived.")) return;
+
+    setActionLoading(true);
+    setFormError(null);
+    try {
+      const res = await fetch(`/api/returns/${returnId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: targetAction }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to change archive status");
+      setSaveSuccess(isCurrentlyArchived ? "Case unarchived successfully!" : "Case archived successfully!");
+      await fetchReturnDetail();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -278,7 +448,7 @@ export default function AdminReturnDetailPage() {
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back to Returns Queue
           </Link>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-black text-slate-900 dark:text-white font-mono">
               {returnRecord.returnReference}
             </h1>
@@ -291,12 +461,14 @@ export default function AdminReturnDetailPage() {
                   : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200"
               }`}
             >
-              Physical: {returnRecord.status.replace(/_/g, " ")}
+              Physical: {returnRecord.status?.replace(/_/g, " ")}
             </span>
             <span
               className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
                 returnRecord.refundStatus === "paid"
                   ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200"
+                  : returnRecord.refundStatus === "payout_failed"
+                  ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-200"
                   : returnRecord.refundStatus === "disputed"
                   ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200"
                   : returnRecord.refundStatus === "not_eligible"
@@ -305,6 +477,24 @@ export default function AdminReturnDetailPage() {
               }`}
             >
               Refund: {(returnRecord.refundStatus || "pending_review").replace(/_/g, " ")}
+            </span>
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                returnRecord.caseEvaluation?.isCaseClosed
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200"
+                  : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200"
+              }`}
+            >
+              Case: {returnRecord.caseEvaluation?.caseStatusLabel || "Open / In Progress"}
+            </span>
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                returnRecord.isArchived
+                  ? "bg-slate-700 text-slate-200 border border-slate-600"
+                  : "bg-purple-950 text-purple-300 border border-purple-800"
+              }`}
+            >
+              {returnRecord.isArchived ? "Archived" : "Active Case"}
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -324,6 +514,96 @@ export default function AdminReturnDetailPage() {
             <span>{saveSuccess}</span>
           </div>
         )}
+      </div>
+
+      {/* Explicit Settlement & Action Controls Bar */}
+      <div className="bg-slate-900 text-white p-4 rounded-2xl border border-slate-800 shadow-md flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck className="w-5 h-5 text-purple-400" />
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-purple-300">
+              Administrative Settlement Actions
+            </h4>
+            <p className="text-[11px] text-slate-400">
+              Audit-logged financial state transitions with explicit confirmation.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 1. Approve Refund */}
+          {(returnRecord.refundStatus === "pending_review" || !returnRecord.refundStatus) && (
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={handleApproveRefund}
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+            >
+              <Check className="w-3.5 h-3.5" /> Approve Refund
+            </button>
+          )}
+
+          {/* 2. Record Payout Initiated */}
+          {returnRecord.refundStatus !== "paid" && returnRecord.refundStatus !== "cancelled" && returnRecord.refundStatus !== "not_eligible" && (
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={handleRecordPayoutInitiated}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+            >
+              <Clock className="w-3.5 h-3.5" /> Record Payout Initiated
+            </button>
+          )}
+
+          {/* 3. Confirm Refund Paid / Payout Completed */}
+          {returnRecord.refundStatus !== "paid" && (
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={() => {
+                setModalPayoutAmount(returnRecord.refundAmount || 0);
+                setModalPayoutMethod(returnRecord.refundMethod || "upi");
+                setModalPayoutRef(returnRecord.refundTransactionReference || "");
+                setModalPayoutProof(returnRecord.refundProofUrl || "");
+                setModalConfirmChecked(false);
+                setIsConfirmPayoutOpen(true);
+              }}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-50 shadow-md shadow-emerald-950/40"
+            >
+              <CheckCircle className="w-3.5 h-3.5" /> Confirm Refund Paid
+            </button>
+          )}
+
+          {/* 4. Record Payout Failed */}
+          {returnRecord.refundStatus !== "paid" && (returnRecord.refundStatus === "payout_initiated" || returnRecord.refundStatus === "awaiting_payout") && (
+            <button
+              type="button"
+              disabled={actionLoading}
+              onClick={() => {
+                setPayoutFailureReasonInput("");
+                setIsPayoutFailedOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+            >
+              <Ban className="w-3.5 h-3.5" /> Record Payout Failed
+            </button>
+          )}
+
+          {/* 5. Archive / Unarchive */}
+          <button
+            type="button"
+            disabled={actionLoading}
+            onClick={handleToggleArchive}
+            className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition disabled:opacity-50 ${
+              returnRecord.isArchived
+                ? "bg-slate-700 hover:bg-slate-600 text-slate-200"
+                : "bg-purple-900/80 hover:bg-purple-800 text-purple-200 border border-purple-700"
+            }`}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            {returnRecord.isArchived ? "Unarchive Case" : "Archive Case"}
+          </button>
+        </div>
       </div>
 
       {/* Disputed Alert Banner */}
@@ -954,6 +1234,199 @@ export default function AdminReturnDetailPage() {
           </form>
         </div>
       </div>
+
+      {/* Confirm Refund Paid / Payout Completed Modal */}
+      {isConfirmPayoutOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-600" />
+                Confirm Refund Paid &amp; Payout Completed
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsConfirmPayoutOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              This action explicitly marks the refund as <strong>Paid</strong> and settles the transaction. Payout transaction reference and verified proof receipt are mandatory.
+            </p>
+
+            <form onSubmit={handleConfirmPayoutCompleted} className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Actual Amount Disbursed (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={modalPayoutAmount}
+                    onChange={(e) => setModalPayoutAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Disbursement Channel *
+                  </label>
+                  <select
+                    value={modalPayoutMethod}
+                    onChange={(e) => setModalPayoutMethod(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                  >
+                    <option value="upi">UPI Direct Transfer</option>
+                    <option value="bank_transfer">Bank Transfer (NEFT/IMPS)</option>
+                    <option value="cash">Counter Cash Slip</option>
+                  </select>
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Bank UTR / UPI Ref / Cash Voucher # *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 12-digit UTR, UPI transaction ref, or signed cash voucher #"
+                    value={modalPayoutRef}
+                    onChange={(e) => setModalPayoutRef(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-xs"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Payout Proof Receipt URL *
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://... (screenshot of successful UPI payout or bank transfer voucher)"
+                    value={modalPayoutProof}
+                    onChange={(e) => setModalPayoutProof(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-xs"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Payout Completion Date &amp; Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={modalPayoutTimestamp}
+                    onChange={(e) => setModalPayoutTimestamp(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    required
+                    checked={modalConfirmChecked}
+                    onChange={(e) => setModalConfirmChecked(e.target.checked)}
+                    className="mt-0.5 rounded text-purple-600 focus:ring-purple-500"
+                  />
+                  <span className="text-[11px] font-semibold text-purple-950 dark:text-purple-200 leading-tight">
+                    I explicitly confirm that ₹{modalPayoutAmount} has actually cleared our payment portal and been disbursed to the customer.
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmPayoutOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  <span>Finalize &amp; Record as Paid</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Record Payout Failed Modal */}
+      {isPayoutFailedOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Ban className="w-5 h-5 text-rose-600" />
+                Record Payout Failure
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsPayoutFailedOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <p className="font-bold">Kept Unpaid &amp; Retryable</p>
+              <p className="text-[11px]">
+                Recording payout failure keeps the return record unpaid so finance staff can retry after correcting customer payment details.
+              </p>
+            </div>
+
+            <form onSubmit={handleRecordPayoutFailed} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Failure Reason (Mandatory) *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="e.g. Beneficiary VPA not active, Bank server timeout, or invalid account number..."
+                  value={payoutFailureReasonInput}
+                  onChange={(e) => setPayoutFailureReasonInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsPayoutFailedOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                  <span>Save Payout Failure</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Lightbox Modal */}
       {previewImage && (

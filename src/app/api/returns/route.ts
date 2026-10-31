@@ -240,13 +240,17 @@ export async function POST(req: NextRequest) {
     // Record order timeline event
     await recordOrderEvent({
       orderId,
+      eventType: requestedResolution === "exchange" ? "exchange_requested" : "return_requested",
+      returnId,
       previousStatus: order.orderStatus,
-      newStatus: order.orderStatus,
+      newStatus: requestedResolution === "exchange" ? "exchange_requested" : "return_requested",
       previousPaymentStatus: order.paymentStatus,
       newPaymentStatus: order.paymentStatus,
       changedByUserId: auth.user.id,
       actorRole: isAdmin ? "admin" : "customer",
-      customerMessage: `Return requested (${returnReference}) for ${validatedItemsToReturn.length} item(s). Reason: ${reason.replace(/_/g, " ")}.`,
+      customerMessage: requestedResolution === "exchange"
+        ? `Exchange requested (${returnReference}) for ${validatedItemsToReturn.length} item(s). Reason: ${reason.replace(/_/g, " ")}.`
+        : `Return requested (${returnReference}) for ${validatedItemsToReturn.length} item(s). Reason: ${reason.replace(/_/g, " ")}.`,
       internalNote: `Return #${returnReference} created by ${auth.user.email}. Est. refund: ₹${calculatedRefundAmount.toFixed(2)}.`,
     });
 

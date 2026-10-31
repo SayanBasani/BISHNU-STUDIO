@@ -5,6 +5,8 @@ import crypto from "crypto";
 
 export interface RecordOrderEventParams {
   orderId: string;
+  eventType?: string | null;
+  returnId?: string | null;
   previousStatus?: string | null;
   newStatus: string;
   previousPaymentStatus?: string | null;
@@ -21,6 +23,8 @@ export async function recordOrderEvent(params: RecordOrderEventParams) {
     await db.insert(orderStatusHistory).values({
       id,
       orderId: params.orderId,
+      eventType: params.eventType || null,
+      returnId: params.returnId || null,
       previousStatus: params.previousStatus || null,
       newStatus: params.newStatus,
       previousPaymentStatus: params.previousPaymentStatus || null,
@@ -44,6 +48,8 @@ export async function getOrderTimeline(orderId: string) {
       .select({
         id: orderStatusHistory.id,
         orderId: orderStatusHistory.orderId,
+        eventType: orderStatusHistory.eventType,
+        returnId: orderStatusHistory.returnId,
         previousStatus: orderStatusHistory.previousStatus,
         newStatus: orderStatusHistory.newStatus,
         previousPaymentStatus: orderStatusHistory.previousPaymentStatus,

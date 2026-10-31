@@ -438,12 +438,16 @@ export const orderStatusHistory = pgTable(
       onDelete: "set null",
     }),
     actorRole: text("actor_role").notNull().default("system"),
+    eventType: text("event_type"),
+    returnId: text("return_id"),
     customerMessage: text("customer_message"),
     internalNote: text("internal_note"),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
   },
   (table) => ({
     orderIdIdx: index("idx_order_status_history_order").on(table.orderId),
+    eventTypeIdx: index("idx_order_status_history_event_type").on(table.eventType),
+    returnIdIdx: index("idx_order_status_history_return_id").on(table.returnId),
   })
 );
 
@@ -607,6 +611,8 @@ export const orderReturns = pgTable("order_returns", {
   exchangeNotes: text("exchange_notes"),
   restocked: boolean("restocked").notNull().default(false),
   restockedAt: bigint("restocked_at", { mode: "number" }),
+  isArchived: boolean("is_archived").notNull().default(false),
+  archivedAt: bigint("archived_at", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowSql),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowSql),
 });

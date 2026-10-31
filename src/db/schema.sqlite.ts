@@ -623,6 +623,8 @@ export const orderStatusHistory = sqliteTable(
     actorRole: text("actor_role", { enum: ["customer", "admin", "system"] })
       .notNull()
       .default("system"),
+    eventType: text("event_type"),
+    returnId: text("return_id"),
     customerMessage: text("customer_message"),
     internalNote: text("internal_note"),
     createdAt: integer("created_at")
@@ -631,6 +633,8 @@ export const orderStatusHistory = sqliteTable(
   },
   (table) => ({
     orderIdIdx: index("idx_order_status_history_order").on(table.orderId),
+    eventTypeIdx: index("idx_order_status_history_event_type").on(table.eventType),
+    returnIdIdx: index("idx_order_status_history_return_id").on(table.returnId),
   })
 );
 
@@ -877,6 +881,7 @@ export const orderReturns = sqliteTable("order_returns", {
       "payout_initiated",
       "paid",
       "failed",
+      "payout_failed",
       "disputed",
       "cancelled",
     ],
@@ -909,6 +914,8 @@ export const orderReturns = sqliteTable("order_returns", {
   exchangeNotes: text("exchange_notes"),
   restocked: integer("restocked", { mode: "boolean" }).notNull().default(false),
   restockedAt: integer("restocked_at"),
+  isArchived: integer("is_archived", { mode: "boolean" }).notNull().default(false),
+  archivedAt: integer("archived_at"),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch() * 1000)`),

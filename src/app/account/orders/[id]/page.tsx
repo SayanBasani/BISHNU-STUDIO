@@ -42,6 +42,8 @@ import {
 interface TimelineEvent {
   id: string;
   orderId: string;
+  eventType?: string | null;
+  returnId?: string | null;
   previousStatus: string | null;
   newStatus: string;
   previousPaymentStatus: string | null;
@@ -446,84 +448,206 @@ export default function OrderTrackingDetailPage() {
   // Timeline events from order_status_history
   for (const ev of rawTimeline) {
     let title = "Status Updated";
-    let desc = ev.customerMessage || `Order status transitioned to ${ev.newStatus.replace(/_/g, " ")}.`;
+    let desc = ev.customerMessage || `Status transitioned to ${ev.newStatus.replace(/_/g, " ")}.`;
     let icon = Clock;
     let variant: "completed" | "active" | "warning" | "danger" | "pending" = "completed";
 
-    switch (ev.newStatus) {
-      case "confirmed":
-        title = "Order Confirmed & Approved";
-        desc = ev.customerMessage || "Order verified and approved for production queue.";
+    const msgLower = (ev.customerMessage || "").toLowerCase();
+    const eventType = ev.eventType || "";
+
+    // 1. Explicit Semantic Event Type Matching
+    if (eventType === "refund_paid") {
+      title = "Refund Sent Successfully";
+      desc = ev.customerMessage || "Refund payout completed and verified.";
+      icon = CreditCard;
+      variant = "completed";
+    } else if (eventType === "refund_payout_initiated") {
+      title = "Refund Transfer Initiated";
+      desc = ev.customerMessage || "Refund payout has been initiated through banking rails.";
+      icon = Clock;
+      variant = "active";
+    } else if (eventType === "refund_payout_failed") {
+      title = "Refund Transfer Failed";
+      desc = ev.customerMessage || "Payout transfer attempt was rejected by banking rail. Staff will retry.";
+      icon = AlertCircle;
+      variant = "danger";
+    } else if (eventType === "refund_approved") {
+      title = "Refund Approved";
+      desc = ev.customerMessage || "Refund approved and scheduled for disbursement.";
+      icon = CheckCircle2;
+      variant = "completed";
+    } else if (eventType === "refund_disputed") {
+      title = "Refund Under Dispute";
+      desc = ev.customerMessage || "Dispute received. Finance team is reviewing transfer details.";
+      icon = AlertTriangle;
+      variant = "warning";
+    } else if (eventType === "refund_dispute_resolved") {
+      title = "Refund Dispute Resolved";
+      desc = ev.customerMessage || "Dispute was resolved and settled.";
+      icon = ShieldCheck;
+      variant = "completed";
+    } else if (eventType === "return_requested") {
+      title = "Return Requested";
+      desc = ev.customerMessage || "Return request submitted and awaiting review.";
+      icon = RotateCcw;
+      variant = "active";
+    } else if (eventType === "exchange_requested") {
+      title = "Exchange Requested";
+      desc = ev.customerMessage || "Exchange request submitted and awaiting review.";
+      icon = RotateCcw;
+      variant = "active";
+    } else if (eventType === "return_approved") {
+      title = "Return Approved";
+      desc = ev.customerMessage || "Return approved for logistics collection.";
+      icon = CheckCircle2;
+      variant = "completed";
+    } else if (eventType === "exchange_approved") {
+      title = "Exchange Approved";
+      desc = ev.customerMessage || "Exchange approved for replacement processing.";
+      icon = CheckCircle2;
+      variant = "completed";
+    } else if (eventType === "return_pickup_scheduled") {
+      title = "Return Pickup Scheduled";
+      desc = ev.customerMessage || "Logistics partner assigned for return package collection.";
+      icon = Truck;
+      variant = "active";
+    } else if (eventType === "return_picked_up") {
+      title = "Return Items Collected";
+      desc = ev.customerMessage || "Items collected and in transit to return location.";
+      icon = Truck;
+      variant = "active";
+    } else if (eventType === "return_item_received") {
+      title = "Return Received at Location";
+      desc = ev.customerMessage || "Items received at return location. Quality inspection will begin.";
+      icon = Store;
+      variant = "active";
+    } else if (eventType === "return_inspection_passed") {
+      title = "Return Inspection Passed";
+      desc = ev.customerMessage || "Returned items inspected and approved for resolution.";
+      icon = ShieldCheck;
+      variant = "completed";
+    } else if (eventType === "return_inspection_failed") {
+      title = "Return Inspection Failed";
+      desc = ev.customerMessage || "Items failed condition check against return guidelines.";
+      icon = AlertCircle;
+      variant = "danger";
+    } else if (eventType === "return_completed") {
+      title = "Physical Return Completed";
+      desc = ev.customerMessage || "Physical return workflow finalized.";
+      icon = CheckCircle2;
+      variant = "completed";
+    } else if (eventType === "return_rejected") {
+      title = "Return Request Declined";
+      desc = ev.customerMessage || "Return request could not be accepted.";
+      icon = AlertCircle;
+      variant = "danger";
+    } else if (eventType === "case_archived") {
+      title = "Return Case Archived";
+      desc = ev.customerMessage || "Return case finalized and archived.";
+      icon = ShieldCheck;
+      variant = "completed";
+    } else if (eventType === "replacement_order_created") {
+      title = "Replacement Order Created";
+      desc = ev.customerMessage || "Replacement order created for exchange fulfillment.";
+      icon = Package;
+      variant = "completed";
+    } else if (
+      // 2. Legacy / Heuristic Return Keywords Guard (PREVENTS false positive "Order Delivered/Collected")
+      ev.returnId ||
+      msgLower.includes("return #") ||
+      msgLower.includes("return requested") ||
+      msgLower.includes("return approved") ||
+      msgLower.includes("refund disbursed") ||
+      msgLower.includes("refund processed") ||
+      msgLower.includes("refund sent") ||
+      msgLower.includes("refund transfer") ||
+      msgLower.includes("inspection passed") ||
+      msgLower.includes("inspection failed") ||
+      msgLower.includes("dispute opened")
+    ) {
+      if (msgLower.includes("dispute")) {
+        title = "Refund Under Dispute";
+        icon = AlertTriangle;
+        variant = "warning";
+      } else if (msgLower.includes("refund disbursed") || msgLower.includes("refund processed") || msgLower.includes("refund sent") || ev.newPaymentStatus === "refunded") {
+        title = "Refund Sent Successfully";
+        icon = CreditCard;
+        variant = "completed";
+      } else if (msgLower.includes("payout initiated") || msgLower.includes("transfer initiated")) {
+        title = "Refund Transfer Initiated";
+        icon = Clock;
+        variant = "active";
+      } else if (msgLower.includes("inspection passed")) {
+        title = "Return Inspection Passed";
         icon = ShieldCheck;
         variant = "completed";
-        break;
-      case "processing":
-        title = "Print Room Processing Started";
-        desc = ev.customerMessage || "Custom printing, cutting, or lamination is actively underway.";
-        icon = Printer;
-        variant = "active";
-        break;
-      case "ready_for_collection":
-        title = isDelivery ? "Packed & Ready for Dispatch" : "Ready for Counter Pickup";
-        desc =
-          ev.customerMessage ||
-          (isDelivery
-            ? "Order is packaged and awaiting courier dispatch."
-            : "Order is packaged and waiting at collection counter.");
-        icon = isDelivery ? Package : Store;
-        variant = "active";
-        break;
-      case "out_for_delivery":
-        title = "Dispatched for Doorstep Delivery";
-        desc = ev.customerMessage || "Package has been dispatched with delivery courier.";
-        icon = Truck;
-        variant = "active";
-        break;
-      case "completed":
-        title = isDelivery ? "Order Delivered Successfully" : "Order Collected by Customer";
-        desc = ev.customerMessage || "Fulfillment completed and verified by staff.";
+      } else if (msgLower.includes("inspection failed")) {
+        title = "Return Inspection Failed";
+        icon = AlertCircle;
+        variant = "danger";
+      } else if (msgLower.includes("return approved")) {
+        title = "Return Approved";
         icon = CheckCircle2;
         variant = "completed";
-        break;
-      case "cancelled":
-        title = "Order Cancelled";
-        desc = ev.customerMessage || "Order was cancelled. Production has been halted.";
-        icon = XCircle;
+      } else if (msgLower.includes("declined") || msgLower.includes("rejected")) {
+        title = "Return Declined";
+        icon = AlertCircle;
         variant = "danger";
-        break;
-      default:
-        // Handle return & refund actions from customerMessage
-        const msg = (ev.customerMessage || "").toLowerCase();
-        if (ev.newPaymentStatus === "refunded" || msg.includes("refund disbursed") || msg.includes("refund processed")) {
-          title = "Refund Disbursed & Settled";
-          icon = CreditCard;
-          variant = "completed";
-        } else if (msg.includes("dispute")) {
-          title = "Refund Disputed";
-          icon = AlertTriangle;
-          variant = "warning";
-        } else if (msg.includes("return requested")) {
-          title = "Return Requested";
-          icon = RotateCcw;
-          variant = "active";
-        } else if (msg.includes("return approved")) {
-          title = "Return Approved";
-          icon = CheckCircle2;
-          variant = "completed";
-        } else if (msg.includes("pickup scheduled") || msg.includes("picked up")) {
-          title = "Return Pickup Logistics";
-          icon = Truck;
-          variant = "active";
-        } else if (msg.includes("inspection passed")) {
-          title = "Inspection Passed";
+      } else {
+        title = "Return Status Updated";
+        icon = RotateCcw;
+        variant = "active";
+      }
+    } else {
+      // 3. Normal Order Fulfillment Lifecycle Events
+      switch (ev.newStatus) {
+        case "confirmed":
+          title = "Order Confirmed & Approved";
+          desc = ev.customerMessage || "Order verified and approved for production queue.";
           icon = ShieldCheck;
           variant = "completed";
-        } else if (msg.includes("inspection failed") || msg.includes("declined")) {
-          title = "Inspection / Return Declined";
-          icon = AlertCircle;
+          break;
+        case "processing":
+          title = "Print Room Processing Started";
+          desc = ev.customerMessage || "Custom printing, cutting, or lamination is actively underway.";
+          icon = Printer;
+          variant = "active";
+          break;
+        case "ready_for_collection":
+          title = isDelivery ? "Packed & Ready for Dispatch" : "Ready for Counter Pickup";
+          desc =
+            ev.customerMessage ||
+            (isDelivery
+              ? "Order is packaged and awaiting courier dispatch."
+              : "Order is packaged and waiting at collection counter.");
+          icon = isDelivery ? Package : Store;
+          variant = "active";
+          break;
+        case "out_for_delivery":
+          title = "Dispatched for Doorstep Delivery";
+          desc = ev.customerMessage || "Package has been dispatched with delivery courier.";
+          icon = Truck;
+          variant = "active";
+          break;
+        case "completed":
+          title = isDelivery ? "Order Delivered Successfully" : "Order Collected by Customer";
+          desc = ev.customerMessage || "Fulfillment completed and verified by staff.";
+          icon = CheckCircle2;
+          variant = "completed";
+          break;
+        case "cancelled":
+          title = "Order Cancelled";
+          desc = ev.customerMessage || "Order was cancelled. Production has been halted.";
+          icon = XCircle;
           variant = "danger";
-        }
-        break;
+          break;
+        default:
+          title = `Status: ${ev.newStatus.replace(/_/g, " ")}`;
+          desc = ev.customerMessage || `Order status updated to ${ev.newStatus.replace(/_/g, " ")}.`;
+          icon = Clock;
+          variant = "completed";
+          break;
+      }
     }
 
     activityEvents.push({
@@ -1102,6 +1226,42 @@ export default function OrderTrackingDetailPage() {
                             </button>
                           )}
                         </div>
+                      </div>
+                    )}
+
+                    {/* In-Transit Payout Banner (payout_initiated) */}
+                    {!isExchange && ret.refundStatus === "payout_initiated" && (
+                      <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700 text-blue-900 dark:text-blue-100 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold flex items-center gap-1.5 text-xs text-blue-800 dark:text-blue-300">
+                            <Clock className="w-4 h-4 text-blue-600 animate-pulse" />
+                            Refund Transfer Initiated
+                          </span>
+                          <span className="font-black text-sm text-blue-700 dark:text-blue-300 font-mono">
+                            {formatINR(ret.refundAmount || order.totalAmount)}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed">
+                          Your refund transfer has been dispatched via <strong>{(ret.refundMethod || "UPI/Bank").toUpperCase()}</strong>. Banking networks normally complete settlement to your account within 1-3 business days.
+                          {ret.refundTransactionReference && (
+                            <span className="block mt-1 font-mono text-slate-600 dark:text-slate-300">Reference: {ret.refundTransactionReference}</span>
+                          )}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Failed Payout Banner (payout_failed) */}
+                    {!isExchange && (ret.refundStatus === "payout_failed" || ret.refundStatus === "failed") && (
+                      <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-100 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold flex items-center gap-1.5 text-xs text-rose-800 dark:text-rose-300">
+                            <AlertCircle className="w-4 h-4 text-rose-600" />
+                            Refund Transfer Processing Delay
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed">
+                          A previous transfer attempt encountered a temporary issue with the destination account. Our finance team is reviewing your account details and will re-attempt the payout.
+                        </p>
                       </div>
                     )}
 
