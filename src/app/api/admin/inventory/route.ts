@@ -3,6 +3,7 @@ import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { products, productCategories } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, desc, asc } from "drizzle-orm";
 import { z } from "zod";
 
@@ -100,6 +101,13 @@ export async function PATCH(req: NextRequest) {
     }
 
     await db.update(products).set(updates).where(eq(products.id, productId));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "products",
+      entityId: productId,
+      operation: "UPDATE",
+      payload: updates,
+    });
 
     await logAuditEvent({
       userId: auth.user.id,

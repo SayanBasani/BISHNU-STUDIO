@@ -70,20 +70,26 @@ export async function POST(req: NextRequest) {
     const downloadUrl = `/api/files/download/${stored.fileId}`;
 
     // Record in orderFiles table
-    await timer.measure("database.order_files.insert", async () => {
-      return await db.insert(orderFiles).values({
-        id: stored.fileId,
-        uploadedByUserId: auth.user.id,
-        originalFilename: stored.originalFilename,
-        storedFilename: stored.storedFilename,
-        storageKey: stored.storageKey,
-        fileSize: stored.fileSize,
-        mimeType: stored.mimeType,
-        fileCategory: "profile_picture",
-        pageCount: 1,
-        isDeleted: false,
+    try {
+      await timer.measure("database.order_files.insert", async () => {
+        return await db.insert(orderFiles).values({
+          id: stored.fileId,
+          uploadedByUserId: auth.user.id,
+          originalFilename: stored.originalFilename,
+          storedFilename: stored.storedFilename,
+          storageKey: stored.storageKey,
+          fileSize: stored.fileSize,
+          mimeType: stored.mimeType,
+          fileCategory: "profile_picture",
+          pageCount: 1,
+          isDeleted: false,
+        });
       });
-    });
+    } catch (insertError) {
+      // Clean up uploaded avatar if DB insertion fails
+      await deleteFileFromStorage(stored.storageKey).catch(() => {});
+      throw insertError;
+    }
 
     // Query current avatar URL before update to allow safe post-commit cleanup
     const currentUser = await timer.measure("database.user.get_current", async () => {

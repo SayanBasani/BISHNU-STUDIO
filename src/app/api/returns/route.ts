@@ -17,6 +17,7 @@ import {
 import { getShopSettings } from "@/lib/settings";
 import { logAuditEvent } from "@/lib/audit";
 import { recordOrderEvent } from "@/lib/order-timeline";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -202,30 +203,38 @@ export async function POST(req: NextRequest) {
     const returnReference = generateReturnReference();
     const now = Date.now();
 
-    // Insert return record
-    await db.insert(orderReturns).values({
+    const returnData = {
       id: returnId,
       returnReference,
       orderId,
       customerId: order.customerId,
-      status: "requested",
+      status: "requested" as any,
       reason,
       customerDescription: customerDescription.trim(),
-      requestedResolution,
-      pickupMethod,
+      requestedResolution: requestedResolution as any,
+      pickupMethod: pickupMethod as any,
       evidenceUrlsJson: evidenceUrls && evidenceUrls.length > 0 ? JSON.stringify(evidenceUrls) : null,
       refundAmount: calculatedRefundAmount,
-      refundStatus: "pending_review",
-      refundMethod: refundMethod || (pickupMethod === "counter_dropoff" ? "cash" : "upi"),
+      refundStatus: "pending_review" as any,
+      refundMethod: (refundMethod || (pickupMethod === "counter_dropoff" ? "cash" : "upi")) as any,
       refundDestinationJson: refundDestination ? JSON.stringify(refundDestination) : null,
       restocked: false,
       createdAt: now,
       updatedAt: now,
+    };
+
+    // Insert return record
+    await db.insert(orderReturns).values(returnData);
+    await recordMutationIfInFallback(db, {
+      entityType: "order_returns",
+      entityId: returnId,
+      operation: "INSERT",
+      payload: returnData,
     });
 
     // Insert return items
     for (const vItem of validatedItemsToReturn) {
-      await db.insert(orderReturnItems).values({
+      const returnItemData = {
         id: vItem.id,
         returnId,
         orderItemId: vItem.orderItemId,
@@ -234,6 +243,13 @@ export async function POST(req: NextRequest) {
         unitPriceSnapshot: vItem.unitPriceSnapshot,
         totalPriceSnapshot: vItem.totalPriceSnapshot,
         createdAt: now,
+      };
+      await db.insert(orderReturnItems).values(returnItemData);
+      await recordMutationIfInFallback(db, {
+        entityType: "order_return_items",
+        entityId: vItem.id,
+        operation: "INSERT",
+        payload: returnItemData,
       });
     }
 

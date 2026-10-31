@@ -4,6 +4,7 @@ import { users, userAddresses } from "@/db/schema";
 import { hashPassword, createSession, setSessionCookie } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -74,21 +75,29 @@ export async function POST(req: NextRequest) {
     const passwordHash = await hashPassword(password);
     const userId = `usr_${crypto.randomUUID()}`;
 
-    await db.insert(users).values({
+    const userData = {
       id: userId,
       fullName,
       email,
       phone,
       passwordHash,
-      role: "customer",
+      role: "customer" as const,
       isEmailVerified: false,
       isPhoneVerified: false,
+    };
+    await db.insert(users).values(userData);
+    await recordMutationIfInFallback(db, {
+      entityType: "users",
+      entityId: userId,
+      operation: "INSERT",
+      payload: userData,
     });
 
     // If address provided, create user_addresses record
     if (address) {
-      await db.insert(userAddresses).values({
-        id: `addr_${crypto.randomUUID()}`,
+      const addrId = `addr_${crypto.randomUUID()}`;
+      const addrData = {
+        id: addrId,
         userId,
         label: "Home",
         houseBuilding: address.houseBuilding,
@@ -97,6 +106,13 @@ export async function POST(req: NextRequest) {
         state: address.state,
         pinCode: address.pinCode,
         isDefault: true,
+      };
+      await db.insert(userAddresses).values(addrData);
+      await recordMutationIfInFallback(db, {
+        entityType: "user_addresses",
+        entityId: addrId,
+        operation: "INSERT",
+        payload: addrData,
       });
     }
 

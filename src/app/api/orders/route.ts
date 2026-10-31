@@ -19,6 +19,7 @@ import { generateOrderReference } from "@/lib/utils";
 import { logAuditEvent } from "@/lib/audit";
 import { recordOrderEvent } from "@/lib/order-timeline";
 import { getShopSettings } from "@/lib/settings";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, desc, inArray, and, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -196,6 +197,16 @@ export async function POST(req: NextRequest) {
             updatedAt: Date.now(),
           })
           .where(eq(products.id, item.productId));
+
+        await recordMutationIfInFallback(db, {
+          entityType: "products",
+          entityId: item.productId,
+          operation: "UPDATE",
+          payload: {
+            stockQuantity: calc.product.stockQuantity - item.quantity,
+            updatedAt: Date.now(),
+          },
+        });
       } else if (item.itemType === "pvc_card") {
         resolvedServiceId = "srv_pvc";
         const calc = await calculatePvcPrice({
@@ -296,28 +307,35 @@ export async function POST(req: NextRequest) {
         : "print_service";
 
     // Insert Order record
-    await db.insert(orders).values({
+    const orderData = {
       id: orderId,
       orderReference,
       customerId: auth.user.id,
-      orderType,
+      orderType: orderType as any,
       subtotal: calculatedSubtotal,
       discount: 0,
       additionalCharges: deliveryCharge,
       totalAmount: finalTotal,
-      paymentStatus: initialPaymentStatus,
-      paymentMethod,
-      orderStatus: "pending",
-      deliveryType,
+      paymentStatus: initialPaymentStatus as any,
+      paymentMethod: paymentMethod as any,
+      orderStatus: "pending" as any,
+      deliveryType: deliveryType as any,
       orderNotes: orderNotes || null,
       shippingAddressJson: shippingAddress
         ? JSON.stringify(shippingAddress)
         : null,
+    };
+    await db.insert(orders).values(orderData);
+    await recordMutationIfInFallback(db, {
+      entityType: "orders",
+      entityId: orderId,
+      operation: "INSERT",
+      payload: orderData,
     });
 
     // Insert Order Items and Link Uploaded Files
     for (const item of verifiedItems) {
-      await db.insert(orderItems).values({
+      const itemData = {
         id: item.id,
         orderId,
         itemType: item.itemType as any,
@@ -329,6 +347,13 @@ export async function POST(req: NextRequest) {
         unitPriceSnapshot: item.unitPriceSnapshot,
         totalPriceSnapshot: item.totalPriceSnapshot,
         specialInstructions: item.specialInstructions || null,
+      };
+      await db.insert(orderItems).values(itemData);
+      await recordMutationIfInFallback(db, {
+        entityType: "order_items",
+        entityId: item.id,
+        operation: "INSERT",
+        payload: itemData,
       });
 
       // Link any files associated with this item
@@ -341,6 +366,12 @@ export async function POST(req: NextRequest) {
               orderItemId: item.id,
             })
             .where(eq(orderFiles.id, fId));
+          await recordMutationIfInFallback(db, {
+            entityType: "order_files",
+            entityId: fId,
+            operation: "UPDATE",
+            payload: { orderId, orderItemId: item.id },
+          });
         }
       }
     }

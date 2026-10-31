@@ -47,10 +47,29 @@ This document establishes permanent operating rules, quality standards, and Git 
      10. Run automated tests verifying both engines.
    - **Application-Level Compatibility**: Ensure query syntax, joins, transactions, JSON serialization, timestamp handling (`Date.now()` vs `now()`), and boolean flags execute identically under both drivers.
    - **Production Default**: Neon PostgreSQL is the authoritative production database. Mode C (Local Development / SQLite) is strictly prohibited from running in production or on Vercel.
-3. **Confidentiality & Information Barriers**:
+3. **Permanent File Storage & Customer Privacy Protocol (BS-FINAL-06)**:
+   - **Storage Abstraction**: All file uploads, downloads, and deletions must route through the provider-independent storage abstraction (`src/lib/storage/index.ts`).
+   - **Cloud Object Storage (Cloudflare R2)**: Production cloud uploads use Cloudflare R2 via official AWS S3 SDK (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`). Local disk (`./uploads/`) is retained for offline development.
+   - **Strict Privacy Boundary**:
+     - *Public assets*: Product catalog images and avatars (if public) may be delivered via CDN/public URLs.
+     - *Private customer documents*: PVC cards, Aadhaar/identity documents, PDF prints, photos, payment screenshots, and refund payout receipts must NEVER be exposed via public bucket URLs.
+     - *Authorization Check*: All private files must be requested through `/api/files/download/[fileId]` which strictly enforces authorization: uploader (`fileRecord.uploadedByUserId === auth.user.id`), order customer (`order.customerId === auth.user.id`), or admin/staff (`role === "admin" || role === "staff"`).
+   - **Cryptographic Keys & Path Traversal Prevention**: Storage keys must be generated using randomized UUIDs (`fil_${uuid}_${hex}.${ext}`). Never use client-supplied filenames as storage keys. Sanitize filenames and reject path traversal characters (`..`).
+   - **Orphan File Cleanup**: If database metadata insertion fails after an upload, immediately delete the uploaded object from storage.
+   - **Non-Destructive Migration**: Migrating files from local disk to R2 (`scripts/migrate-uploads-to-cloud.ts`) must never delete local files until verification is complete.
+4. **Permanent Transactional Outbox & Synchronization Protocol (BS-FINAL-06)**:
+   - **Mode B Outbox Coverage**: In `emergency_fallback` mode (Mode B), every mutating operation on business entities (`orders`, `order_items`, `payments`, `payment_submissions`, `order_returns`, `order_return_items`, `products`, `users`, `user_addresses`, `order_files`) MUST queue an event to `db_sync_outbox` in the same database transaction via `recordMutationIfInFallback()`.
+   - **Strict Allowlist**: `TABLE_FIELD_ALLOWLIST` strictly enforces allowed tables and fields. Arbitrary SQL tables or unmapped properties are rejected.
+   - **Dependency Replay Priority**: Outbox replay to Neon must strictly follow foreign-key dependency order (`ENTITY_REPLAY_PRIORITY`: users &rarr; categories &rarr; products &rarr; orders &rarr; items &rarr; files &rarr; payments &rarr; returns).
+   - **Non-Blind Conflict Detection**:
+     - *Orders*: An order verified as `paid` in Neon must NEVER be downgraded. Terminal states (`delivered`, `cancelled`, `completed`) cannot be reverted.
+     - *Payments*: Verified or paid payment records must not be overwritten.
+     - *Refunds*: Confirmed payout records with transaction references must not be downgraded.
+   - **Replay Idempotency & Lock**: Target database inserts check for existing records by ID to safely absorb duplicate deliveries. A concurrency lock (`isSynchronizationLocked()`) prevents racing workers.
+5. **Confidentiality & Information Barriers**:
    - `orders.internalNotes` and `orderReturns.internalNotes` are confidential internal staff remarks. They must never be leaked to customer-facing APIs (`isAdmin ? record.internalNotes : undefined`).
    - Customer-visible fulfillment instructions belong in `customerFulfillmentNote` or `customerInstructions`.
-4. **Asset & Input Security**:
+6. **Asset & Input Security**:
    - Validate logo URLs and courier tracking links with `validateLogoPath` and `validateTrackingUrl` (`src/lib/business.ts`, `src/lib/order-state-machine.ts`).
    - Strictly prohibit Windows filesystem paths (`C:\...`, `D:\...`), directory traversal (`..`), and unsafe URI schemes (`javascript:`, `file:`, `data:`).
 

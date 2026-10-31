@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { paymentSubmissions, orders, payments } from "@/db/schema";
 import { recordOrderEvent } from "@/lib/order-timeline";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -81,17 +82,26 @@ export async function POST(
 
     const now = Date.now();
 
+    const submissionUpdates = {
+      status: "verified" as const,
+      verifiedByAdminId: auth.user.id,
+      verifiedAt: now,
+      verificationNote: note || "Verified by shop administrator against bank statement",
+      updatedAt: now,
+    };
+
     // 1. Update payment submission to verified
     await db
       .update(paymentSubmissions)
-      .set({
-        status: "verified",
-        verifiedByAdminId: auth.user.id,
-        verifiedAt: now,
-        verificationNote: note || "Verified by shop administrator against bank statement",
-        updatedAt: now,
-      })
+      .set(submissionUpdates)
       .where(eq(paymentSubmissions.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "payment_submissions",
+      entityId: id,
+      operation: "UPDATE",
+      payload: submissionUpdates,
+    });
 
     // 2. Update order payment status to paid
     // If order was pending OR cancelled (Case K post-cancellation claim verified), confirm it!
@@ -101,14 +111,23 @@ export async function POST(
         ? "confirmed"
         : order.orderStatus;
 
+    const orderUpdates = {
+      paymentStatus: "paid" as const,
+      orderStatus: newOrderStatus as any,
+      updatedAt: now,
+    };
+
     await db
       .update(orders)
-      .set({
-        paymentStatus: "paid",
-        orderStatus: newOrderStatus,
-        updatedAt: now,
-      })
+      .set(orderUpdates)
       .where(eq(orders.id, order.id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "orders",
+      entityId: order.id,
+      operation: "UPDATE",
+      payload: orderUpdates,
+    });
 
     // 3. Record in master payments table if not already present
     const existingPay = await db
@@ -118,15 +137,16 @@ export async function POST(
       .limit(1);
 
     if (existingPay.length === 0) {
-      await db.insert(payments).values({
-        id: `pay_${crypto.randomUUID()}`,
+      const payId = `pay_${crypto.randomUUID()}`;
+      const payData = {
+        id: payId,
         orderId: order.id,
-        paymentProvider: "upi",
+        paymentProvider: "upi" as const,
         transactionReference: submission.transactionId,
         amount: submission.amount,
         amountVerified: submission.amount,
         currency: "INR",
-        status: "successful",
+        status: "successful" as const,
         receivingAccountId: submission.receivingAccountId || null,
         receivingUpiIdSnapshot: submission.receivingUpiIdSnapshot || submission.upiIdUsed,
         receivingAccountNameSnapshot: submission.receivingAccountNameSnapshot || null,
@@ -143,6 +163,13 @@ export async function POST(
           isCancelledReopening,
         }),
         createdAt: now,
+      };
+      await db.insert(payments).values(payData);
+      await recordMutationIfInFallback(db, {
+        entityType: "payments",
+        entityId: payId,
+        operation: "INSERT",
+        payload: payData,
       });
     }
 

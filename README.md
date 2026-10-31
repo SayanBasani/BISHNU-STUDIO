@@ -380,7 +380,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser:
 
 ## 14. Running the Test Suite
 
-The repository includes **19 Vitest test suites (207 automated tests)** covering all critical workflows:
+The repository includes **35 Vitest test suites (409 automated tests)** covering all critical workflows:
 
 ```bash
 npm test
@@ -388,6 +388,18 @@ npm test
 
 ### Running Targeted Test Suites
 ```bash
+# Cloud & Local file storage abstraction & security
+npm test -- tests/storage-cloud-and-local.test.ts
+
+# Transactional outbox, recovery & mutation replay
+npm test -- tests/outbox-transaction-and-recovery.test.ts
+
+# Dual database provider switching & fencing safety
+npm test -- tests/dual-database-provider-and-sync.test.ts
+
+# Neon-first database architecture & complete database compatibility
+npm test -- tests/neon-first-and-complete-parity.test.ts
+
 # Order state machine & logistics tracking
 npm test -- tests/order-state-machine-and-tracking.test.ts
 
@@ -473,18 +485,48 @@ When deploying to Vercel:
 
 ---
 
-## 17. Configuring Persistent Uploads
+## 17. Configuring Persistent Uploads & Cloud Storage
 
-### Current Implementation: Local Filesystem
-The application saves uploaded print files (PDF documents, PVC scans, photo portraits) and UPI payment proof screenshots to the local filesystem in `./uploads/` via `src/lib/storage.ts`:
-- All uploads are validated using genuine file magic-byte signatures (`%PDF-`, JPEG, PNG, WebP).
-- Private documents are stored in `./uploads/private/` outside the web root and served through authenticated routes with access control.
+The Bishnu Studio platform implements a cloud-ready, provider-independent storage abstraction in `src/lib/storage/` supporting both local filesystem storage and **Cloudflare R2** (or any AWS S3-compatible object store) via the official `@aws-sdk/client-s3` library.
 
-### Serverless Storage Consideration
-> [!IMPORTANT]
-> Vercel functions execute in stateless, ephemeral serverless containers. While files written to `./uploads/` work for local development, they will not persist across serverless redeployments or container recycling on Vercel.
->
-> For long-term production file persistence on Vercel, a cloud object store (such as **Cloudflare R2**, **AWS S3**, or **Vercel Blob**) should be integrated into `src/lib/storage.ts`. Until that driver is added, database records will persist on Neon, but uploaded proof screenshots on Vercel will be ephemeral.
+### Storage Architecture Overview
+- **Storage Adapter Abstraction**: Defined in `src/lib/storage/types.ts` (`StorageAdapter` interface) with concrete implementations `LocalStorageAdapter` and `R2StorageAdapter`.
+- **Zero-Crash Graceful Fallback**: If `STORAGE_PROVIDER=r2` is configured but credentials or bucket settings are missing or invalid, the platform automatically logs a sanitized warning and falls back to `LocalStorageAdapter`.
+- **Hybrid Download Fallback**: When running in production with R2, if an existing customer file was created on local disk prior to cloud migration, `downloadFileFromStorage` checks R2 and transparently falls back to local disk, ensuring zero broken links or failed downloads during transition.
+
+### Public vs Private Access Model
+| Storage Scope | Asset Types | Storage Path | Access Method & Authorization |
+| :--- | :--- | :--- | :--- |
+| **Public Assets** | Product images, store banners, user avatars | `public/products/`, `public/avatars/` | Direct CDN / static public URL (`/uploads/public/...` or R2 public endpoint). |
+| **Private Documents** | PVC identity cards, customer PDF documents, passport/portrait photos, UPI payment screenshots, refund payout proofs | `private/documents/`, `private/payments/`, `private/refunds/` | **Strictly authenticated API proxy** (`/api/files/download/[fileId]`). Access permitted only if requester is the original uploader (`uploadedByUserId === user.id`), the order owner (`order.customerId === user.id`), or authorized studio staff/admin (`role === 'admin' \|\| role === 'staff'`). Never directly served without authorization. |
+
+### Environment Variables
+Configure the following variables in `.env.local` or Vercel Project Settings:
+
+| Variable | Required? | Default | Purpose |
+| :--- | :--- | :--- | :--- |
+| `STORAGE_PROVIDER` | No | `local` | Storage driver: `local` (filesystem) or `r2` (Cloudflare R2 / AWS S3). |
+| `R2_ACCOUNT_ID` | Required for R2 | — | Cloudflare account ID. |
+| `R2_ACCESS_KEY_ID` | Required for R2 | — | S3-compatible API token access key ID. |
+| `R2_SECRET_ACCESS_KEY` | Required for R2 | — | S3-compatible API token secret access key. |
+| `R2_BUCKET_NAME` | Required for R2 | — | Cloudflare R2 bucket name (e.g. `bishnu-studio-production`). |
+| `R2_ENDPOINT` | Optional | Derived | Custom S3 endpoint URL (defaults to `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`). |
+| `R2_PUBLIC_BASE_URL` | Optional | — | Custom CDN or public domain for public assets (e.g. `https://media.bishnustudio.com`). |
+| `LOCAL_UPLOAD_DIR` | No | `./uploads` | Base local disk path for local adapter and fallback downloads. |
+
+### Migrating Existing Files to Cloud Object Storage
+A dedicated, resumable, and dry-run-capable CLI tool is provided to migrate existing local `./uploads/` files to Cloudflare R2:
+
+```bash
+# Step 1: Preflight audit & dry run (zero writes to cloud)
+npx tsx scripts/migrate-uploads-to-cloud.ts --dry-run
+
+# Step 2: Execute live upload migration with bounded concurrency (default 5 workers)
+npx tsx scripts/migrate-uploads-to-cloud.ts --execute --concurrency=5
+```
+
+- **Resumable State**: Upload progress and file SHA-256 hashes are recorded in `data/storage-migration-state.json`. If interrupted, re-running the script skips already-migrated files.
+- **Non-Destructive**: Local files are **never deleted** during migration. The local files remain safely in place as an on-premise secondary copy.
 
 ---
 
@@ -509,22 +551,57 @@ When your development and testing phase is complete and you are ready to point t
 
 ---
 
-## 19. Backups and Recovery
+## 19. Backups, Recovery & Disaster Scenarios
+
+The Bishnu Studio dual-database architecture guarantees zero business interruption, resilient disaster recovery, and point-in-time recovery for both Neon PostgreSQL and SQLite/LibSQL standby.
 
 ### 1. Neon Continuous Backups & Point-in-Time Recovery (PITR)
-- Neon continuously archives write-ahead logs (WAL).
-- On the Neon Free Tier, you can restore your database to any specific second within the last 24 hours.
-- To restore in Neon Console: Navigate to **Branches** → **Restore to point in time**.
+- **Continuous Write-Ahead Logs (WAL)**: Neon continuously archives all write transactions to object storage.
+- **Instant Point-in-Time Branching**: On Neon, you can create a new branch or restore to any exact millisecond within your retention window without downtime.
+- **Console Workflow**: Go to **Neon Console** → Select Project → **Branches** → **New Branch** → Choose **Point in Time** → Select exact date/timestamp.
 
-### 2. Manual Backup with `pg_dump`
+### 2. Manual Backup with `pg_dump` and `pg_restore`
 ```bash
+# Create binary compressed custom-format backup
 pg_dump "postgresql://neondb_owner:YOUR_PASSWORD@ep-your-project.region.aws.neon.tech/neondb?sslmode=require" -F c -b -v -f "./backup_bishnu_$(date +%Y%m%d).dump"
-```
 
-### 3. Restoring with `pg_restore`
-```bash
+# Restore to a clean database
 pg_restore -d "postgresql://neondb_owner:YOUR_PASSWORD@ep-your-project.region.aws.neon.tech/neondb?sslmode=require" -v "./backup_bishnu_20261025.dump"
 ```
+
+### 3. SQLite / LibSQL Snapshot & Restore Verification
+The repository includes an automated verification script that creates an isolated database snapshot, executes restore, and validates 100% row counts and schema integrity across all tables:
+```bash
+npx tsx scripts/verify-backup-restore.ts
+```
+
+### 4. Disaster Recovery Playbooks
+
+#### Scenario A: Neon Cloud Database Temporarily Unavailable
+1. An administrator accesses `/admin/settings/database` or uses the database management CLI.
+2. The operating mode is switched to **Mode B: Emergency Fallback (SQLite / Standby)**.
+3. The platform immediately directs queries to the local/standby SQLite database.
+4. **Transactional Outbox Coverage**: Every business mutation (orders, payment submissions, payment verification, inventory updates, returns, user registrations) automatically records a pending event in `db_sync_outbox` in the same local transaction.
+5. Store operations, order taking, and customer checkout proceed without interruption.
+
+#### Scenario B: Neon Cloud Database Restored & Recovery Synchronization
+1. When Neon connectivity is restored, verify readiness via `/api/health/db`.
+2. Open `/admin/settings/database` and click **"Preview Pending Operations"** (Dry Run) to inspect pending outbox events and detect potential conflicts without modifying Neon.
+3. If conflicts are detected (e.g. order cancelled in Neon while completed in fallback), inspect and resolve via the **Conflict Resolution Modal**.
+4. Click **"Synchronize Pending Mutations"** (or call `/api/admin/database/sync`).
+5. Replay occurs in strict foreign-key dependency priority:
+   - `users` → `categories` → `products` → `orders` → `order_items` → `order_files` → `payment_submissions` → `payments` → `returns`
+6. Once all outbox events are marked `completed`, switch the operating mode back to **Mode A: Neon Primary**.
+
+#### Scenario C: Both Primary and Standby Databases Unavailable
+1. Transition operating mode to **Mode D: Maintenance Mode**.
+2. Maintenance mode safely blocks all write mutations with HTTP 503 while allowing read-only status and informational notices to customers.
+3. Investigate network, compute suspension, or DNS issues. Once underlying infrastructure is verified, transition directly back to Mode A or Mode B.
+
+#### Scenario D: Schema Migration Rollback & Emergency Recovery
+1. If a database migration fails during deployment, Neon PITR allows branching to the instant right before the migration began.
+2. For local/standby recovery, restore from the latest snapshot created by `scripts/verify-backup-restore.ts`.
+3. Outbox events have an exponential retry counter (`retryCount`) and can be selectively re-triggered from `/api/admin/database/sync/retry` without data loss.
 
 ---
 

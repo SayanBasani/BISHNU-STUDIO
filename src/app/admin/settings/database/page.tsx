@@ -24,6 +24,7 @@ import {
   FileCheck2,
   ShieldCheck,
   Info,
+  X,
 } from "lucide-react";
 
 interface DatabaseStatusData {
@@ -66,6 +67,9 @@ interface DatabaseStatusData {
     syncedCount: number;
     conflictCount: number;
     failedCount: number;
+    oldestPendingAgeMs?: number | null;
+    lastFailedError?: string | null;
+    isSyncLocked?: boolean;
     lastHistory: any | null;
   };
 }
@@ -88,6 +92,17 @@ export default function AdminDatabaseSettingsPage() {
   // Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any | null>(null);
+
+  // Preview Modal state
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewData, setPreviewData] = useState<any[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  // Conflicts Modal state
+  const [showConflictsModal, setShowConflictsModal] = useState(false);
+  const [conflictsData, setConflictsData] = useState<any[]>([]);
+  const [loadingConflicts, setLoadingConflicts] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
 
   const fetchStatus = async (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true);
@@ -172,6 +187,79 @@ export default function AdminDatabaseSettingsPage() {
     } finally {
       setSyncing(false);
     }
+  };
+
+  const handleOpenPreview = async () => {
+    setLoadingPreview(true);
+    setShowPreviewModal(true);
+    try {
+      const res = await fetch("/api/admin/database/sync/preview");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load preview");
+      setPreviewData(json.preview || []);
+    } catch (err: any) {
+      alert("Error loading preview: " + err.message);
+      setShowPreviewModal(false);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleOpenConflicts = async () => {
+    setLoadingConflicts(true);
+    setShowConflictsModal(true);
+    try {
+      const res = await fetch("/api/admin/database/sync/conflicts");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load conflicts");
+      setConflictsData(json.conflicts || []);
+    } catch (err: any) {
+      alert("Error loading conflicts: " + err.message);
+      setShowConflictsModal(false);
+    } finally {
+      setLoadingConflicts(false);
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    setRetryingFailed(true);
+    try {
+      const res = await fetch("/api/admin/database/sync/retry", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to retry events");
+      await fetchStatus(true);
+      alert(`Success: ${json.message}`);
+    } catch (err: any) {
+      alert("Retry Error: " + err.message);
+    } finally {
+      setRetryingFailed(false);
+    }
+  };
+
+  const handleResolveConflict = async (eventId: string, resolution: "discard" | "retry") => {
+    try {
+      const res = await fetch("/api/admin/database/sync/conflicts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, resolution }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to resolve conflict");
+      await handleOpenConflicts();
+      await fetchStatus(true);
+    } catch (err: any) {
+      alert("Conflict Resolution Error: " + err.message);
+    }
+  };
+
+  const formatAge = (ms?: number | null) => {
+    if (!ms || ms <= 0) return "None";
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    return `${hr}h ago`;
   };
 
   const getModeBadge = (mode?: string) => {
@@ -365,18 +453,37 @@ export default function AdminDatabaseSettingsPage() {
             <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span className="font-semibold uppercase tracking-wider text-[10px]">Sync Outbox Queue</span>
-                <Activity className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                {data.syncSummary.isSyncLocked ? (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" /> In Progress
+                  </span>
+                ) : (
+                  <Activity className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                )}
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-xl font-extrabold text-slate-900 dark:text-white">
-                  {data.syncSummary.pendingCount}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="text-xl font-extrabold text-slate-900 dark:text-white">
+                    {data.syncSummary.pendingCount}
+                  </div>
+                  <span className="text-xs text-slate-500">pending</span>
                 </div>
-                <span className="text-xs text-slate-500">pending mutations</span>
+                {data.syncSummary.oldestPendingAgeMs !== undefined && data.syncSummary.oldestPendingAgeMs !== null && (
+                  <div className="text-[10px] text-slate-400">
+                    Oldest: <span className="font-mono text-purple-600 dark:text-purple-400 font-semibold">{formatAge(data.syncSummary.oldestPendingAgeMs)}</span>
+                  </div>
+                )}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex justify-between">
-                <span>Conflicts: {data.syncSummary.conflictCount}</span>
-                <span>Synced: {data.syncSummary.syncedCount}</span>
+                <span>Conflicts: <strong className="text-amber-600 dark:text-amber-400">{data.syncSummary.conflictCount}</strong></span>
+                <span>Failed: <strong className="text-rose-600 dark:text-rose-400">{data.syncSummary.failedCount}</strong></span>
+                <span>Synced: <strong className="text-emerald-600 dark:text-emerald-400">{data.syncSummary.syncedCount}</strong></span>
               </div>
+              {data.syncSummary.lastFailedError && (
+                <div className="text-[10px] text-rose-500 truncate bg-rose-50 dark:bg-rose-950/30 p-1.5 rounded-lg border border-rose-200 dark:border-rose-900">
+                  Last error: {data.syncSummary.lastFailedError}
+                </div>
+              )}
             </div>
           </div>
 
@@ -427,17 +534,40 @@ export default function AdminDatabaseSettingsPage() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => handleRunSync(true)}
-                  disabled={syncing || data.syncSummary.pendingCount === 0}
+                  onClick={handleOpenPreview}
+                  disabled={loadingPreview || data.syncSummary.pendingCount === 0}
                   className="px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all disabled:opacity-50"
                 >
-                  Dry-Run Validate
+                  {loadingPreview ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : null}
+                  Dry-Run Preview
                 </button>
+
+                {data.syncSummary.conflictCount > 0 && (
+                  <button
+                    onClick={handleOpenConflicts}
+                    disabled={loadingConflicts}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition-all"
+                  >
+                    Inspect Conflicts ({data.syncSummary.conflictCount})
+                  </button>
+                )}
+
+                {data.syncSummary.failedCount > 0 && (
+                  <button
+                    onClick={handleRetryFailed}
+                    disabled={retryingFailed}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 hover:bg-rose-100 transition-all disabled:opacity-50"
+                  >
+                    {retryingFailed ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : null}
+                    Retry Failed ({data.syncSummary.failedCount})
+                  </button>
+                )}
+
                 <button
                   onClick={() => handleRunSync(false)}
-                  disabled={syncing || data.syncSummary.pendingCount === 0}
+                  disabled={syncing || data.syncSummary.pendingCount === 0 || data.syncSummary.isSyncLocked}
                   className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition-all disabled:opacity-50"
                 >
                   {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -655,6 +785,168 @@ export default function AdminDatabaseSettingsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dry-Run Operations Preview Modal */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-3xl rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl p-6 space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <FileCheck2 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  Dry-Run Synchronization Preview
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Operations to be applied in dependency order. No data is modified during preview.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {previewData.length === 0 ? (
+                <div className="text-center py-10 text-xs text-slate-400">
+                  No pending mutations found in the outbox queue.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-semibold border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">Operation</th>
+                        <th className="py-2.5 px-3">Target Table</th>
+                        <th className="py-2.5 px-3">Record ID</th>
+                        <th className="py-2.5 px-3">Event ID</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
+                      {previewData.map((item, idx) => (
+                        <tr key={item.eventId} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2 px-3 text-slate-400">{idx + 1}</td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                item.operation === "INSERT"
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                  : item.operation === "UPDATE"
+                                  ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                                  : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                              }`}
+                            >
+                              {item.operation}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-semibold text-slate-800 dark:text-slate-200">{item.entityType}</td>
+                          <td className="py-2 px-3 text-slate-600 dark:text-slate-400 truncate max-w-xs">{item.entityId}</td>
+                          <td className="py-2 px-3 text-slate-400 text-[10px]">{item.eventId.substring(0, 12)}...</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict Inspection & Resolution Modal */}
+      {showConflictsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-3xl rounded-2xl border border-amber-200 dark:border-amber-900 bg-white dark:bg-slate-900 shadow-2xl p-6 space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-amber-800 dark:text-amber-400 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                  Synchronization Conflicts
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Mutations blocked due to domain-aware conflict rules (e.g., protected paid orders or recent primary modifications).
+                </p>
+              </div>
+              <button
+                onClick={() => setShowConflictsModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {conflictsData.length === 0 ? (
+                <div className="text-center py-10 text-xs text-slate-400">
+                  No unresolved synchronization conflicts found.
+                </div>
+              ) : (
+                conflictsData.map((conf) => {
+                  let reason = "Conflicting state detected";
+                  try {
+                    const parsed = JSON.parse(conf.conflictDetails || "{}");
+                    if (parsed.reason) reason = parsed.reason;
+                  } catch {}
+
+                  return (
+                    <div
+                      key={conf.id}
+                      className="p-4 rounded-xl border border-amber-200 dark:border-amber-950 bg-amber-50/50 dark:bg-amber-950/20 text-xs space-y-2"
+                    >
+                      <div className="flex items-center justify-between font-mono text-[11px]">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">
+                          {conf.entityType.toUpperCase()}: <span className="text-purple-600">{conf.entityId}</span>
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-bold">
+                          {conf.operation}
+                        </span>
+                      </div>
+                      <p className="text-amber-900 dark:text-amber-300 text-[11px] font-sans">
+                        <strong>Reason:</strong> {reason}
+                      </p>
+                      <div className="flex justify-end gap-2 pt-2 border-t border-amber-100 dark:border-amber-900/40">
+                        <button
+                          onClick={() => handleResolveConflict(conf.id, "discard")}
+                          className="px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100"
+                        >
+                          Discard Outbox Event
+                        </button>
+                        <button
+                          onClick={() => handleResolveConflict(conf.id, "retry")}
+                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                        >
+                          Retry Mutation
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => setShowConflictsModal(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+              >
+                Close Conflicts
+              </button>
+            </div>
           </div>
         </div>
       )}

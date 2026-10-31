@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
-import { orderFiles } from "@/db/schema";
-import { getFullPathFromStorageKey } from "@/lib/storage";
+import { orderFiles, orders } from "@/db/schema";
+import { downloadFileFromStorage } from "@/lib/storage";
 import { eq } from "drizzle-orm";
-import fs from "fs";
 import { createRequestTimer } from "@/lib/perf";
 
 export const dynamic = "force-dynamic";
@@ -60,12 +59,23 @@ export async function GET(
       }
 
       // Authorization Check:
-      // Allow if user is admin/staff OR if user is the original uploader
+      // Allow if user is admin/staff OR if user is the original uploader OR if user is the customer of the order
       const isAdminOrStaff =
         auth.user.role === "admin" || auth.user.role === "staff";
-      const isOwner = fileRecord.uploadedByUserId === auth.user.id;
+      let isAuthorized = fileRecord.uploadedByUserId === auth.user.id;
 
-      if (!isAdminOrStaff && !isOwner) {
+      if (!isAdminOrStaff && !isAuthorized && fileRecord.orderId) {
+        const orderRows = await db
+          .select({ customerId: orders.customerId })
+          .from(orders)
+          .where(eq(orders.id, fileRecord.orderId))
+          .limit(1);
+        if (orderRows.length > 0 && orderRows[0].customerId === auth.user.id) {
+          isAuthorized = true;
+        }
+      }
+
+      if (!isAdminOrStaff && !isAuthorized) {
         return timer.finish(
           NextResponse.json(
             { error: "Access denied. You do not have permission to view or download this document." },
@@ -89,11 +99,15 @@ export async function GET(
       );
     }
 
-    const fullDiskPath = getFullPathFromStorageKey(fileRecord.storageKey);
-    if (!fs.existsSync(fullDiskPath)) {
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = await timer.measure("storage.read_data", async () => {
+        return await downloadFileFromStorage(fileRecord.storageKey);
+      });
+    } catch (storageErr) {
       return timer.finish(
         NextResponse.json(
-          { error: "File data not found on disk storage." },
+          { error: "File data not found on storage." },
           {
             status: 404,
             headers: {
@@ -104,13 +118,9 @@ export async function GET(
       );
     }
 
-    const fileBuffer = await timer.measure("storage.read_disk", async () => {
-      return await fs.promises.readFile(fullDiskPath);
-    });
-
     const safeFilename = encodeURIComponent(fileRecord.originalFilename);
 
-    const res = new NextResponse(fileBuffer, {
+    const res = new NextResponse(fileBuffer as any, {
       headers: {
         "Content-Type": fileRecord.mimeType,
         "Content-Length": fileBuffer.length.toString(),

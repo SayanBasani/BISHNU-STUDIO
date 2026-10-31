@@ -18,6 +18,7 @@ import {
 } from "@/lib/settings";
 import { recordOrderEvent } from "@/lib/order-timeline";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, and, desc, ne } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -362,13 +363,20 @@ export async function POST(
       .set({ orderId: id })
       .where(eq(orderFiles.id, screenshotFile.id));
 
-    // Insert payment submission with immutable receiving account snapshot
-    await db.insert(paymentSubmissions).values({
+    await recordMutationIfInFallback(db, {
+      entityType: "order_files",
+      entityId: screenshotFile.id,
+      operation: "UPDATE",
+      payload: { orderId: id },
+    });
+
+    const now = Date.now();
+    const submissionData = {
       id: submissionId,
       orderId: id,
       customerId: order.customerId,
       amount: order.totalAmount,
-      paymentMethod: "upi",
+      paymentMethod: "upi" as const,
       upiIdUsed: targetUpiId,
       receivingAccountId: targetAccountId,
       receivingUpiIdSnapshot: targetUpiId,
@@ -376,25 +384,43 @@ export async function POST(
       transactionId: cleanTrId,
       screenshotFileId: screenshotFile.id,
       screenshotUrl: `/api/files/download/${screenshotFile.id}`,
-      status: targetSubmissionStatus,
-      submissionType,
+      status: targetSubmissionStatus as any,
+      submissionType: submissionType as any,
       isDuplicateFlagged,
       duplicateNotes,
       idempotencyKey: idempotencyKey || null,
       attemptNumber,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Insert payment submission with immutable receiving account snapshot
+    await db.insert(paymentSubmissions).values(submissionData);
+    await recordMutationIfInFallback(db, {
+      entityType: "payment_submissions",
+      entityId: submissionId,
+      operation: "INSERT",
+      payload: submissionData,
     });
+
+    const orderUpdates = {
+      paymentStatus: targetOrderPaymentStatus as any,
+      paymentMethod: "upi_mock" as any,
+      updatedAt: now,
+    };
 
     // Update order payment status
     await db
       .update(orders)
-      .set({
-        paymentStatus: targetOrderPaymentStatus,
-        paymentMethod: "upi_mock",
-        updatedAt: Date.now(),
-      })
+      .set(orderUpdates)
       .where(eq(orders.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "orders",
+      entityId: id,
+      operation: "UPDATE",
+      payload: orderUpdates,
+    });
 
     // Record timeline event
     await recordOrderEvent({

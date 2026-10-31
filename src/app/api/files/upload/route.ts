@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/lib/auth";
-import { validateFileBuffer, saveFileToStorage, FileCategory } from "@/lib/storage";
+import { validateFileBuffer, saveFileToStorage, deleteFileFromStorage, FileCategory } from "@/lib/storage";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { db } from "@/db";
 import { orderFiles } from "@/db/schema";
@@ -60,20 +60,28 @@ export async function POST(req: NextRequest) {
     const retentionMs = 30 * 24 * 60 * 60 * 1000;
     const retentionExpiresAt = Date.now() + retentionMs;
 
-    // Record in database
-    await db.insert(orderFiles).values({
-      id: stored.fileId,
-      uploadedByUserId: auth.user.id,
-      originalFilename: stored.originalFilename,
-      storedFilename: stored.storedFilename,
-      storageKey: stored.storageKey,
-      fileSize: stored.fileSize,
-      mimeType: stored.mimeType,
-      fileCategory: stored.fileCategory,
-      pageCount: stored.pageCount || 1,
-      retentionExpiresAt,
-      isDeleted: false,
-    });
+    try {
+      // Record in database
+      await db.insert(orderFiles).values({
+        id: stored.fileId,
+        uploadedByUserId: auth.user.id,
+        originalFilename: stored.originalFilename,
+        storedFilename: stored.storedFilename,
+        storageKey: stored.storageKey,
+        fileSize: stored.fileSize,
+        mimeType: stored.mimeType,
+        fileCategory: stored.fileCategory,
+        pageCount: stored.pageCount || 1,
+        retentionExpiresAt,
+        isDeleted: false,
+      });
+    } catch (dbError) {
+      // Orphan cleanup: delete uploaded object immediately if database metadata persistence fails
+      await deleteFileFromStorage(stored.storageKey).catch((cleanupErr) => {
+        console.error("Failed to clean up orphan uploaded file after DB error:", cleanupErr);
+      });
+      throw dbError;
+    }
 
     return NextResponse.json({
       success: true,

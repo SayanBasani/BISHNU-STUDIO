@@ -21,6 +21,9 @@
 /data/*.sql
 /data/*.backup
 /data/*.dump.gz
+/data/storage-migration-state.json
+/data/db-control-plane.json
+
 
 # Uploads & Customer Private Documents
 /uploads/*
