@@ -133,7 +133,7 @@ describe("UPI Payment Verification & Order Progress Timeline Tests", () => {
         orderType: "mixed",
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
+      } as any);
     });
 
     afterEach(async () => {
@@ -235,7 +235,7 @@ describe("UPI Payment Verification & Order Progress Timeline Tests", () => {
         orderType: "mixed",
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
+      } as any);
     });
 
     afterEach(async () => {
@@ -436,7 +436,7 @@ describe("UPI Payment Verification & Order Progress Timeline Tests", () => {
         orderType: "mixed",
         deliveryType: "store_pickup",
         createdAt: Date.now(),
-      });
+      } as any);
 
       const sub2Id = `sub_dup2_${Date.now()}`;
       await db.insert(paymentSubmissions).values({

@@ -64,14 +64,14 @@ describe("Admin Sidebar Scroll, Safe Test DB Reset, Review Eligibility & Orders 
   describe("PART 2: Safe Test Environment Reset & Production Protection", () => {
     it("should refuse to execute reset when environment is detected as production", async () => {
       const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+      (process.env as any).NODE_ENV = "production";
 
       try {
         await expect(resetTestDatabase()).rejects.toThrow(
           /Resetting data is strictly prohibited in production/
         );
       } finally {
-        process.env.NODE_ENV = originalEnv;
+        (process.env as any).NODE_ENV = originalEnv;
       }
     });
 
@@ -151,7 +151,7 @@ describe("Admin Sidebar Scroll, Safe Test DB Reset, Review Eligibility & Orders 
         totalAmount: 250,
         orderStatus: "processing", // Incomplete
         paymentStatus: "paid",
-      });
+      } as any);
 
       await db.insert(orderItems).values({
         id: `item_proc_${Date.now()}`,
@@ -178,7 +178,7 @@ describe("Admin Sidebar Scroll, Safe Test DB Reset, Review Eligibility & Orders 
         totalAmount: 250,
         orderStatus: "completed", // Complete
         paymentStatus: "paid",
-      });
+      } as any);
 
       await db.insert(orderItems).values({
         id: `item_comp_${Date.now()}`,

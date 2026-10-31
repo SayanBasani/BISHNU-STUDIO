@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { userAddresses } from "@/db/schema";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 
@@ -83,6 +84,16 @@ export async function PUT(
       .set(updatePayload)
       .where(eq(userAddresses.id, id));
 
+    await recordMutationIfInFallback(db, {
+      entityType: "user_addresses",
+      entityId: id,
+      operation: "UPDATE",
+      payload: {
+        id,
+        ...updatePayload,
+      },
+    });
+
     const updated = await db
       .select()
       .from(userAddresses)
@@ -127,6 +138,13 @@ export async function DELETE(
 
     const wasDefault = existing[0].isDefault;
     await db.delete(userAddresses).where(eq(userAddresses.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "user_addresses",
+      entityId: id,
+      operation: "DELETE",
+      payload: { id },
+    });
 
     // If deleted address was default, promote another address to default
     if (wasDefault) {

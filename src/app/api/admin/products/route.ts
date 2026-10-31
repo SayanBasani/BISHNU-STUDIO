@@ -3,6 +3,7 @@ import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { products, productImages } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -90,26 +91,74 @@ export async function POST(req: NextRequest) {
       sku,
     });
 
+    await recordMutationIfInFallback(db, {
+      entityType: "products",
+      entityId: productId,
+      operation: "INSERT",
+      payload: {
+        id: productId,
+        categoryId,
+        name,
+        slug,
+        description,
+        price,
+        discountedPrice: discountedPrice || null,
+        stockQuantity,
+        isAvailable: true,
+        sku,
+      },
+    });
+
     if (images && images.length > 0) {
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
+        const imgId = `img_${crypto.randomUUID()}`;
         await db.insert(productImages).values({
-          id: `img_${crypto.randomUUID()}`,
+          id: imgId,
           productId,
           imageUrl: img.imageUrl,
           altText: name,
           isPrimary: img.isPrimary ?? (i === 0),
           sortOrder: img.sortOrder ?? i,
         });
+
+        await recordMutationIfInFallback(db, {
+          entityType: "product_images",
+          entityId: imgId,
+          operation: "INSERT",
+          payload: {
+            id: imgId,
+            productId,
+            imageUrl: img.imageUrl,
+            altText: name,
+            isPrimary: img.isPrimary ?? (i === 0),
+            sortOrder: img.sortOrder ?? i,
+          },
+        });
       }
     } else if (imageUrl) {
+      const imgId = `img_${crypto.randomUUID()}`;
       await db.insert(productImages).values({
-        id: `img_${crypto.randomUUID()}`,
+        id: imgId,
         productId,
         imageUrl,
         altText: name,
         isPrimary: true,
         sortOrder: 0,
+      });
+
+      await recordMutationIfInFallback(db, {
+        entityType: "product_images",
+        entityId: imgId,
+        operation: "INSERT",
+        payload: {
+          id: imgId,
+          productId,
+          imageUrl,
+          altText: name,
+          isPrimary: true,
+          sortOrder: 0,
+        },
       });
     }
 

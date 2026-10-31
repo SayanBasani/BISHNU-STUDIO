@@ -3,6 +3,7 @@ import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { productCategories, products } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -45,6 +46,16 @@ export async function PUT(
       updates.sortOrder = validation.data.sortOrder;
 
     await db.update(productCategories).set(updates).where(eq(productCategories.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "product_categories",
+      entityId: id,
+      operation: "UPDATE",
+      payload: {
+        id,
+        ...updates,
+      },
+    });
 
     await logAuditEvent({
       userId: auth.user.id,
@@ -97,6 +108,13 @@ export async function DELETE(
     }
 
     await db.delete(productCategories).where(eq(productCategories.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "product_categories",
+      entityId: id,
+      operation: "DELETE",
+      payload: { id },
+    });
 
     await logAuditEvent({
       userId: auth.user.id,

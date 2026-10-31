@@ -3,6 +3,7 @@ import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { orders, orderItems, products } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq } from "drizzle-orm";
 
 export async function POST(
@@ -47,13 +48,25 @@ export async function POST(
     }
 
     // Update status to cancelled
+    const cancelNow = Date.now();
     await db
       .update(orders)
       .set({
         orderStatus: "cancelled",
-        updatedAt: Date.now(),
+        updatedAt: cancelNow,
       })
       .where(eq(orders.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "orders",
+      entityId: id,
+      operation: "UPDATE",
+      payload: {
+        id,
+        orderStatus: "cancelled",
+        updatedAt: cancelNow,
+      },
+    });
 
     // Return products to inventory if any
     const items = await db
@@ -70,10 +83,22 @@ export async function POST(
           .limit(1);
 
         if (prod.length > 0) {
+          const newStock = prod[0].stock + item.quantity;
           await db
             .update(products)
-            .set({ stockQuantity: prod[0].stock + item.quantity })
+            .set({ stockQuantity: newStock, updatedAt: cancelNow })
             .where(eq(products.id, item.productId));
+
+          await recordMutationIfInFallback(db, {
+            entityType: "products",
+            entityId: item.productId,
+            operation: "UPDATE",
+            payload: {
+              id: item.productId,
+              stockQuantity: newStock,
+              updatedAt: cancelNow,
+            },
+          });
         }
       }
     }

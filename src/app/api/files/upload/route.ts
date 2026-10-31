@@ -96,8 +96,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("File upload failed:", error);
+    const errorMessage = error?.message?.startsWith("CRITICAL_STORAGE_ERROR")
+      ? error.message
+      : "File upload failed. Please verify the document and try again.";
     return NextResponse.json(
-      { error: "File upload failed. Please verify the document and try again." },
+      { error: errorMessage },
       { status: 500 }
     );
   }

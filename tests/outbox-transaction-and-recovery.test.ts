@@ -32,11 +32,17 @@ describe("BS-FINAL-06: Outbox Atomicity, Dependency Replay, Conflict Rules & Rec
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("orders");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("order_items");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("order_files");
+      expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("order_status_history");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("payments");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("payment_submissions");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("order_returns");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("order_return_items");
       expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("products");
+      expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("product_categories");
+      expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("product_reviews");
+      expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("shop_settings");
+      expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("shop_upi_accounts");
+      expect(TABLE_FIELD_ALLOWLIST).toHaveProperty("account_appeals");
     });
 
     it("should reject arbitrary unauthorized entities from outbox queueing", async () => {

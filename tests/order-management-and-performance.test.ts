@@ -319,7 +319,7 @@ describe("Complete Order Management & Performance Audit Tests", () => {
         paymentProofUrl: "/uploads/proofs/test.jpg",
         receivingUpiIdSnapshot: "9735154080@slc",
         status: "pending_verification",
-      });
+      } as any);
 
       // Before admin verification: amount verified is 0
       const unverifiedSubs = await db
@@ -327,7 +327,7 @@ describe("Complete Order Management & Performance Audit Tests", () => {
         .from(paymentSubmissions)
         .where(eq(paymentSubmissions.orderId, orderId));
       const verifiedBefore = unverifiedSubs.filter((s) => s.status === "verified");
-      const paidBefore = verifiedBefore.reduce((sum, s) => sum + (s.amountClaimed || s.amount || 0), 0);
+      const paidBefore = verifiedBefore.reduce((sum, s) => sum + ((s as any).amountClaimed || s.amount || 0), 0);
       const remainingBefore = Math.max(0, totalAmount - paidBefore);
 
       expect(paidBefore).toBe(0);
@@ -336,7 +336,7 @@ describe("Complete Order Management & Performance Audit Tests", () => {
       // Admin verifies submission
       await db
         .update(paymentSubmissions)
-        .set({ status: "verified", verifiedByUserId: adminId, verifiedAt: Date.now() })
+        .set({ status: "verified", verifiedByUserId: adminId, verifiedAt: Date.now() } as any)
         .where(eq(paymentSubmissions.id, subId));
       await db
         .update(orders)
@@ -348,7 +348,7 @@ describe("Complete Order Management & Performance Audit Tests", () => {
         .from(paymentSubmissions)
         .where(eq(paymentSubmissions.orderId, orderId));
       const verifiedAfter = verifiedSubs.filter((s) => s.status === "verified");
-      const paidAfter = verifiedAfter.reduce((sum, s) => sum + (s.amountClaimed || s.amount || 0), 0);
+      const paidAfter = verifiedAfter.reduce((sum, s) => sum + ((s as any).amountClaimed || s.amount || 0), 0);
       const remainingAfter = Math.max(0, totalAmount - paidAfter);
 
       expect(paidAfter).toBe(500);

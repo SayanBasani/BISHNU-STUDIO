@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { orderReturns, orders } from "@/db/schema";
 import { recordOrderEvent } from "@/lib/order-timeline";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -70,6 +71,19 @@ export async function POST(
         updatedAt: now,
       })
       .where(eq(orderReturns.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "order_returns",
+      entityId: id,
+      operation: "UPDATE",
+      payload: {
+        id,
+        refundStatus: "disputed",
+        refundDisputeReason: disputeReason,
+        refundDisputedAt: now,
+        updatedAt: now,
+      },
+    });
 
     const orderRows = await db
       .select()

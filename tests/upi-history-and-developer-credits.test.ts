@@ -169,7 +169,7 @@ describe("Bishnu Studio — UPI Account History, Payment Reconciliation & Develo
         notes: "Reconciliation Test Order",
         createdAt: now,
         updatedAt: now,
-      });
+      } as any);
 
       // 2. Submit payment recording snapshot of activeAccount
       await db.insert(paymentSubmissions).values({

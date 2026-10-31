@@ -34,7 +34,7 @@ describe("Cart Quantity, Buy Now, Selective Checkout & Unified Printing Service 
         description: "Test Category",
         sortOrder: 1,
         isActive: true,
-      })
+      } as any)
       .onConflictDoNothing();
 
     testProductId = `prod_unit_${Date.now()}`;
@@ -52,7 +52,7 @@ describe("Cart Quantity, Buy Now, Selective Checkout & Unified Printing Service 
         stockQuantity: 150, // Available stock 150
         isAvailable: true,
         primaryImage: "/images/a4.jpg",
-      })
+      } as any)
       .onConflictDoNothing();
 
     outOfStockProductId = `prod_oos_${Date.now()}`;
@@ -70,7 +70,7 @@ describe("Cart Quantity, Buy Now, Selective Checkout & Unified Printing Service 
         stockQuantity: 0, // Out of stock
         isAvailable: false,
         primaryImage: "/images/oos.jpg",
-      })
+      } as any)
       .onConflictDoNothing();
   });
 

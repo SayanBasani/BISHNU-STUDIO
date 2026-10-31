@@ -61,7 +61,7 @@
 | **Document Processing** | `pdf-lib` (pure JS server-side PDF page counting & validation) |
 | **File Storage** | Private local filesystem storage (`./uploads/` partitioned by category) with genuine magic-byte file signature validation |
 | **Authentication** | Dual authentication: Fixed Owner Admin via environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`), Customer authentication via bcryptjs hashes, session cookies, and rate-limited OTPs |
-| **Automated Testing** | **Vitest 2.1** test suite (15 test suites, 156 automated tests covering payments, pricing, auth, migrations, orders, and performance) |
+| **Automated Testing** | **Vitest 2.1** test suite (35 test suites, 411 automated tests covering payments, pricing, auth, migrations, orders, and performance) |
 
 ---
 
@@ -380,7 +380,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser:
 
 ## 14. Running the Test Suite
 
-The repository includes **35 Vitest test suites (409 automated tests)** covering all critical workflows:
+The repository includes **35 Vitest test suites (411 automated tests)** covering all critical workflows:
 
 ```bash
 npm test
@@ -627,8 +627,8 @@ Follow this checklist from zero to a live working application:
 ### Phase A: Safe to Do Right Now
 - [x] Repository cloned and inspected.
 - [x] Dependencies installed (`npm install`).
-- [x] Automated test suite verified (`npm test` — 148 tests passing).
-- [x] Production build verified (`npm run build` — 56/56 routes compiled).
+- [x] Automated test suite verified (`npm test` — 35 suites, 411 tests passing).
+- [x] Production build verified (`npm run build` — 60/60 routes compiled).
 
 ### Phase B: Required Before Local Testing with Neon
 - [ ] **Step 1**: Create a test project at [console.neon.tech](https://console.neon.tech/) (Section 6).

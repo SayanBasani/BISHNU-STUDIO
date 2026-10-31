@@ -101,7 +101,7 @@ describe("Return Lifecycle, Eligibility Engine & Restocking Tests", () => {
         unitPriceSnapshot: 120,
         quantity: 3,
         totalPriceSnapshot: 360,
-      });
+      } as any);
   });
 
   describe("1. Order Return Eligibility Calculations", () => {

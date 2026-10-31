@@ -4,6 +4,7 @@ import { eq, desc, and } from "drizzle-orm";
 import QRCode from "qrcode";
 import { logAuditEvent } from "./audit";
 import crypto from "crypto";
+import { recordMutationIfInFallback } from "./db-sync";
 
 export interface ShopSettingsData {
   id: string;
@@ -199,6 +200,17 @@ export async function updateShopSettings(
       updatedByUserId: adminUserId || null,
     })
     .where(eq(shopSettings.id, "default"));
+
+  await recordMutationIfInFallback(db, {
+    entityType: "shop_settings",
+    entityId: "default",
+    operation: "UPDATE",
+    payload: {
+      id: "default",
+      ...updates,
+      updatedAt: now,
+    },
+  });
 
   if (adminUserId) {
     await logAuditEvent({

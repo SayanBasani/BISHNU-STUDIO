@@ -132,7 +132,7 @@ describe("Profile Management, Password Security & Administrator Precedence", () 
         isActive: true,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
+      } as any);
     });
 
     it("should verify the current password before permitting password rotation", async () => {

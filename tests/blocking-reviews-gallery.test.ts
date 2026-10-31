@@ -321,15 +321,15 @@ describe("User Blocking & Appeals, Product Multi-Image Gallery, and Verified Rev
         id: paidOrderId,
         orderReference: `BS-TEST-ORDER-${Date.now()}`,
         customerId: verifiedCustomerId,
-        orderType: "product",
+        orderType: "shopping",
         subtotal: 350,
         totalAmount: 350,
         orderStatus: "completed",
         paymentStatus: "paid",
-        deliveryType: "store_pickup",
+        deliveryType: "counter_pickup",
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
+      } as any);
 
       await db.insert(orderItems).values({
         id: `item_${crypto.randomUUID().slice(0, 8)}`,

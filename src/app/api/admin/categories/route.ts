@@ -3,6 +3,7 @@ import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { productCategories, products } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -71,6 +72,19 @@ export async function POST(req: NextRequest) {
       slug: cleanSlug,
       description: description?.trim() || null,
       sortOrder,
+    });
+
+    await recordMutationIfInFallback(db, {
+      entityType: "product_categories",
+      entityId: newId,
+      operation: "INSERT",
+      payload: {
+        id: newId,
+        name: name.trim(),
+        slug: cleanSlug,
+        description: description?.trim() || null,
+        sortOrder,
+      },
     });
 
     await logAuditEvent({

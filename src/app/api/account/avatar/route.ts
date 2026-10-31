@@ -160,9 +160,12 @@ export async function POST(req: NextRequest) {
     );
   } catch (error: any) {
     console.error("Profile picture upload error:", error);
+    const errorMessage = error?.message?.startsWith("CRITICAL_STORAGE_ERROR")
+      ? error.message
+      : "Failed to upload profile picture. Please try again.";
     return timer.finish(
       NextResponse.json(
-        { error: "Failed to upload profile picture. Please try again." },
+        { error: errorMessage },
         { status: 500 }
       )
     );

@@ -320,6 +320,15 @@ export class DatabaseProviderManager {
       return { success: true, state: current, message: `Operating mode is already ${targetMode}.` };
     }
 
+    // Safety check: Pinned environment variable prevents inconsistent split-brain switches
+    const envMode = process.env.DATABASE_OPERATING_MODE?.toLowerCase();
+    if (envMode && envMode !== targetMode && !force) {
+      throw new Error(
+        `SWITCH REJECTED: DATABASE_OPERATING_MODE is explicitly pinned to '${envMode}' in environment variables. ` +
+        `To switch operating modes across distributed serverless instances, update DATABASE_OPERATING_MODE in hosting environment variables.`
+      );
+    }
+
     // Safety checks for target mode
     if (targetMode === "emergency_fallback") {
       if (!safety.isFallbackPersistentAndSafe && !force) {
@@ -381,10 +390,15 @@ export class DatabaseProviderManager {
       `[Database Provider Manager] Switched mode from ${current.mode} to ${targetMode} (Provider: ${newProvider}, Fencing Token: ${newFencingToken}) by ${adminUserId}: ${reason}`
     );
 
+    const serverlessNotice =
+      safety.isVercel || safety.isProduction
+        ? ` Note: On serverless hosting, configure DATABASE_OPERATING_MODE=${targetMode} in project environment variables to guarantee persistence across all instances.`
+        : "";
+
     return {
       success: true,
       state: updatedState,
-      message: `Successfully switched database operating mode to ${targetMode}.`,
+      message: `Successfully switched database operating mode to ${targetMode}.${serverlessNotice}`,
     };
   }
 

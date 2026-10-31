@@ -23,6 +23,9 @@ let cachedProviderType: StorageProviderType | null = null;
  */
 export function getStorageAdapter(forceNew: boolean = false): StorageAdapter {
   const desiredProvider = (process.env.STORAGE_PROVIDER?.toLowerCase() || "local") as StorageProviderType;
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 
   if (cachedAdapter && !forceNew && cachedProviderType === desiredProvider) {
     return cachedAdapter;
@@ -35,6 +38,11 @@ export function getStorageAdapter(forceNew: boolean = false): StorageAdapter {
       cachedProviderType = "r2";
       return r2;
     } catch (err: any) {
+      if (isProduction) {
+        throw new Error(
+          `CRITICAL_STORAGE_ERROR: Cloudflare R2 is required in production, but initialization failed: ${err.message}`
+        );
+      }
       console.warn(
         `[STORAGE WARNING] STORAGE_PROVIDER is set to 'r2', but initialization failed (${err.message}). Falling back to local disk storage.`
       );
@@ -43,6 +51,12 @@ export function getStorageAdapter(forceNew: boolean = false): StorageAdapter {
       cachedProviderType = "local";
       return local;
     }
+  }
+
+  if (isProduction) {
+    console.warn(
+      "[STORAGE WARNING] Production environment detected with STORAGE_PROVIDER != 'r2'. Local filesystem is ephemeral on serverless containers."
+    );
   }
 
   const local = new LocalStorageAdapter();
@@ -202,6 +216,18 @@ export async function saveFileToStorage(
 
   const storageKey = path.posix.join(subFolder, storedFilename);
   const isPublic = category === "product_image" || category === "profile_picture";
+
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+  const desiredProvider = (process.env.STORAGE_PROVIDER?.toLowerCase() || "local") as StorageProviderType;
+
+  if (isProduction && desiredProvider !== "r2") {
+    throw new Error(
+      "CRITICAL_STORAGE_ERROR: Production environment requires persistent cloud storage (STORAGE_PROVIDER=r2 with valid Cloudflare R2 credentials). " +
+      "Refusing to save customer documents to ephemeral serverless local storage."
+    );
+  }
 
   const adapter = getStorageAdapter();
   const uploadResult = await adapter.uploadFile(buffer, storageKey, validatedMime, isPublic);

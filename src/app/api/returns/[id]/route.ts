@@ -22,6 +22,7 @@ import {
 } from "@/lib/return-state-machine";
 import { logAuditEvent } from "@/lib/audit";
 import { recordOrderEvent } from "@/lib/order-timeline";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -552,6 +553,16 @@ export async function PATCH(
 
     // Apply updates to return record
     await db.update(orderReturns).set(updates).where(eq(orderReturns.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "order_returns",
+      entityId: id,
+      operation: "UPDATE",
+      payload: {
+        id,
+        ...updates,
+      },
+    });
 
     // Determine semantic eventType for timeline
     let eventType: string = "return_status_updated";

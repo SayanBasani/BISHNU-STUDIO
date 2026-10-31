@@ -296,7 +296,7 @@ describe("Bishnu Studio — System Config Theming, Admin Service Pricing & Homep
         deliveryFee: 0,
         totalAmount: historicalTotal,
         deliveryType: "store_pickup",
-      });
+      } as any);
 
       await db.insert(orderItems).values({
         id: itemId,

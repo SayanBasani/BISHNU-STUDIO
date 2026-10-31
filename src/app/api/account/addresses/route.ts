@@ -6,6 +6,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import { createRequestTimer } from "@/lib/perf";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
     }
 
     const newId = `addr_${crypto.randomUUID()}`;
-    await db.insert(userAddresses).values({
+    const addressPayload = {
       id: newId,
       userId: auth.user.id,
       recipientName: data.recipientName.trim(),
@@ -108,6 +109,15 @@ export async function POST(req: NextRequest) {
       state: data.state.trim(),
       pinCode: data.pinCode.trim(),
       isDefault: makeDefault,
+    };
+
+    await db.insert(userAddresses).values(addressPayload);
+
+    await recordMutationIfInFallback(db, {
+      entityType: "user_addresses",
+      entityId: newId,
+      operation: "INSERT",
+      payload: addressPayload,
     });
 
     const created = await db

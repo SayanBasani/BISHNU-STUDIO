@@ -190,5 +190,26 @@ describe("BS-FINAL-06: Storage Architecture (Local & Cloudflare R2 Abstraction)"
 
       await expect(downloadFileFromStorage(stored.storageKey)).rejects.toThrow();
     });
+
+    it("should refuse to save customer documents to ephemeral storage when in production without R2", async () => {
+      const origNodeEnv = process.env.NODE_ENV;
+      const origVercel = process.env.VERCEL;
+      const origProvider = process.env.STORAGE_PROVIDER;
+
+      (process.env as any).NODE_ENV = "production";
+      delete process.env.STORAGE_PROVIDER;
+
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+
+      try {
+        await expect(
+          saveFileToStorage(pngBuffer, "prod_doc.png", "pvc_document", "image/png")
+        ).rejects.toThrow(/CRITICAL_STORAGE_ERROR/);
+      } finally {
+        (process.env as any).NODE_ENV = origNodeEnv;
+        if (origVercel !== undefined) process.env.VERCEL = origVercel;
+        if (origProvider !== undefined) process.env.STORAGE_PROVIDER = origProvider;
+      }
+    });
   });
 });

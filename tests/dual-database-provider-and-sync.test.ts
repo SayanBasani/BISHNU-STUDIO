@@ -78,6 +78,27 @@ describe("BS-DB-01: Dual Database Architecture, Fencing, Fallback & Synchronizat
         })
       ).rejects.toThrow("at least 5 characters");
     });
+
+    it("should reject mode switch when DATABASE_OPERATING_MODE is explicitly pinned in environment", async () => {
+      const origEnvMode = process.env.DATABASE_OPERATING_MODE;
+      process.env.DATABASE_OPERATING_MODE = "neon_primary";
+
+      try {
+        await expect(
+          manager.switchOperatingMode({
+            targetMode: "maintenance",
+            adminUserId: "usr_admin_test_001",
+            reason: "Trying to switch when env pinned to neon_primary",
+          })
+        ).rejects.toThrow(/DATABASE_OPERATING_MODE is explicitly pinned/i);
+      } finally {
+        if (origEnvMode !== undefined) {
+          process.env.DATABASE_OPERATING_MODE = origEnvMode;
+        } else {
+          delete process.env.DATABASE_OPERATING_MODE;
+        }
+      }
+    });
   });
 
   describe("2. Hosting Safety & Vercel Serverless Reality Checks", () => {

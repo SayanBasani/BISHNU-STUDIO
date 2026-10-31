@@ -56,6 +56,8 @@ export interface SyncSummary {
  * Prevents arbitrary SQL injection and protects sensitive columns (e.g., passwords, sessions).
  */
 export const TABLE_FIELD_ALLOWLIST: Record<string, string[]> = {
+  shop_settings: ["id", "shopName", "building", "street", "landmark", "cityTown", "state", "pinCode", "contactPhone", "contactEmail", "openingHours", "logoUrl", "isOpen", "closedMessage", "returnPolicyNotice", "returnWindowDays", "customerFulfillmentNote", "upiEnabled", "merchantName", "upiId", "activeUpiAccountId", "qrMode", "uploadedQrImageUrl", "paymentInstructions", "updatedAt"],
+  shop_upi_accounts: ["id", "upiId", "accountDisplayName", "merchantName", "qrMode", "uploadedQrImageUrl", "paymentInstructions", "isActive", "deactivatedAt", "internalNotes", "createdAt", "updatedAt"],
   users: ["id", "name", "email", "phone", "role", "avatarUrl", "isActive", "createdAt", "updatedAt"],
   user_addresses: ["id", "userId", "recipientName", "phone", "addressLine1", "addressLine2", "city", "state", "pincode", "isDefault", "createdAt", "updatedAt"],
   product_categories: ["id", "name", "slug", "description", "sortOrder", "isActive", "createdAt"],
@@ -64,19 +66,24 @@ export const TABLE_FIELD_ALLOWLIST: Record<string, string[]> = {
   orders: ["id", "orderReference", "customerId", "orderType", "subtotal", "discount", "additionalCharges", "totalAmount", "paymentStatus", "paymentMethod", "orderStatus", "deliveryType", "orderNotes", "shippingAddressJson", "createdAt", "updatedAt"],
   order_items: ["id", "orderId", "itemType", "productId", "serviceId", "configurationJson", "quantity", "pageCount", "unitPriceSnapshot", "totalPriceSnapshot", "specialInstructions", "stockDeducted", "createdAt"],
   order_files: ["id", "orderId", "orderItemId", "uploadedByUserId", "originalFilename", "storedFilename", "storageKey", "fileSize", "mimeType", "fileCategory", "pageCount", "retentionExpiresAt", "isDeleted", "createdAt"],
+  order_status_history: ["id", "orderId", "status", "note", "notifiedCustomer", "createdByUserId", "createdAt"],
   payments: ["id", "orderId", "paymentProvider", "transactionReference", "amount", "currency", "status", "receivingAccountId", "metadataJson", "createdAt"],
   payment_submissions: ["id", "orderId", "customerId", "amount", "receivingAccountId", "receivingUpiIdSnapshot", "receivingAccountNameSnapshot", "upiIdUsed", "transactionId", "screenshotFileId", "screenshotUrl", "status", "submissionType", "isDuplicateFlagged", "rejectionReason", "rejectionNote", "verifiedByAdminId", "verifiedAt", "verificationNote", "createdAt", "updatedAt"],
   order_returns: ["id", "orderId", "customerId", "actionType", "resolutionType", "reasonCategory", "customerNote", "status", "physicalStatus", "refundStatus", "refundMethod", "refundAmount", "refundReference", "refundProofUrl", "payoutCompletedAt", "settledByAdminId", "adminNote", "customerDisputeNote", "customerDisputedAt", "createdAt", "updatedAt"],
   order_return_items: ["id", "returnId", "orderItemId", "quantity", "conditionReceived", "inspectionNotes"],
+  product_reviews: ["id", "productId", "userId", "orderId", "rating", "reviewText", "isVerifiedPurchase", "isApproved", "createdAt"],
   service_prices: ["id", "serviceType", "subType", "price", "currency", "unit", "isActive", "updatedAt"],
   notifications: ["id", "userId", "title", "message", "type", "linkUrl", "isRead", "metadataJson", "createdAt"],
   audit_logs: ["id", "userId", "action", "entityType", "entityId", "detailsJson", "ipAddress", "createdAt"],
+  account_appeals: ["id", "userId", "reason", "status", "adminNotes", "resolvedAt", "resolvedByAdminId", "createdAt", "updatedAt"],
 };
 
 /**
  * Foreign-key dependency priority. Lower numbers are inserted first and deleted last.
  */
 export const ENTITY_REPLAY_PRIORITY: Record<string, number> = {
+  shop_settings: 5,
+  shop_upi_accounts: 8,
   users: 10,
   user_addresses: 20,
   product_categories: 30,
@@ -85,12 +92,15 @@ export const ENTITY_REPLAY_PRIORITY: Record<string, number> = {
   orders: 50,
   order_items: 60,
   order_files: 70,
+  order_status_history: 75,
   payments: 80,
   payment_submissions: 90,
   order_returns: 100,
   order_return_items: 110,
+  product_reviews: 115,
   service_prices: 120,
   notifications: 130,
+  account_appeals: 135,
   audit_logs: 140,
 };
 
@@ -630,6 +640,8 @@ async function detectConflict(
  */
 function getSchemaExportName(entityType: string): string {
   const map: Record<string, string> = {
+    shop_settings: "shopSettings",
+    shop_upi_accounts: "shopUpiAccounts",
     users: "users",
     user_addresses: "userAddresses",
     product_categories: "productCategories",
@@ -638,13 +650,16 @@ function getSchemaExportName(entityType: string): string {
     orders: "orders",
     order_items: "orderItems",
     order_files: "orderFiles",
+    order_status_history: "orderStatusHistory",
     payments: "payments",
     payment_submissions: "paymentSubmissions",
     order_returns: "orderReturns",
     order_return_items: "orderReturnItems",
+    product_reviews: "productReviews",
     service_prices: "servicePrices",
     notifications: "notifications",
     audit_logs: "auditLogs",
+    account_appeals: "accountAppeals",
   };
   return map[entityType] || entityType;
 }

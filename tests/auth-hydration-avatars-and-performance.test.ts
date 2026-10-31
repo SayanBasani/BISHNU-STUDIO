@@ -4,7 +4,7 @@ import path from "path";
 import { clearNotificationCache } from "@/components/NotificationBell";
 import { saveFileToStorage, deleteFileFromStorage, getFullPathFromStorageKey } from "@/lib/storage";
 import { createRequestTimer } from "@/lib/perf";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 describe("BS-AUTH-03A: Workstream 1 & 2 - Authentication Hydration and Navbar Structure", () => {
   const navbarSource = fs.readFileSync(
@@ -187,7 +187,7 @@ describe("BS-AUTH-03A: Workstream 5 & 6 - Performance Diagnosis, Polling Protect
     const val = await timer.measure("test_calc", async () => 42);
     expect(val).toBe(42);
 
-    const res = timer.finish(new Response(JSON.stringify({ ok: true })));
+    const res = timer.finish(NextResponse.json({ ok: true }));
     expect(res.headers.get("x-request-id")).toBe("req_test_auth_03a");
   });
 });

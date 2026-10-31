@@ -3,6 +3,7 @@ import { getAuthSession } from "@/lib/auth";
 import { db } from "@/db";
 import { products, productImages, productCategories } from "@/db/schema";
 import { logAuditEvent } from "@/lib/audit";
+import { recordMutationIfInFallback } from "@/lib/db-sync";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
@@ -68,13 +69,25 @@ export async function PUT(
 
     const { imageUrl, images, ...updateFields } = validation.data;
 
+    const now = Date.now();
     await db
       .update(products)
       .set({
         ...updateFields,
-        updatedAt: Date.now(),
+        updatedAt: now,
       })
       .where(eq(products.id, id));
+
+    await recordMutationIfInFallback(db, {
+      entityType: "products",
+      entityId: id,
+      operation: "UPDATE",
+      payload: {
+        id,
+        ...updateFields,
+        updatedAt: now,
+      },
+    });
 
     if (images !== undefined) {
       // Replace images with new list
